@@ -10015,6 +10015,13 @@ Process.prototype.reportDigitalReading = function (pin, booleanValue) {
     );
 };
 
+Process.prototype.reportParallelMap = function(mapper, aList, aCount) {
+    if (aList.length() === 0) 
+        {
+            return 0;
+        } 
+} 
+
 // Context /////////////////////////////////////////////////////////////
 
 /*

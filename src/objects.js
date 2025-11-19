@@ -1147,6 +1147,11 @@ SpriteMorph.prototype.primitiveBlocks = function () {
             spec: 'request %msg %survey',
             code: 'request'
         },
+        reportParallelMap: {
+        	type: 'reporter',
+        	category: 'variables',
+        	spec: 'parallelMap %repRing over %l %s'//%parallel'
+        },
         doWait: {
             type: 'command',
             category: 'control',
@@ -4105,6 +4110,7 @@ SpriteMorph.prototype.blockTemplates = function (
         blocks.push(block('reportConcatenatedLists'));
         blocks.push(block('reportReshape'));
         blocks.push(block('reportCrossproduct'));
+        blocks.push(block('reportParallelMap'));
 
         if (SpriteMorph.prototype.showingExtensions) {
             blocks.push('=');

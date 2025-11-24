@@ -1152,6 +1152,13 @@ SpriteMorph.prototype.primitiveBlocks = function () {
         	category: 'variables',
         	spec: 'parallelMap %repRing over %l %s'//%parallel'
         },
+        reportMapReduce: {
+        	type: 'reporter',
+        	category: 'variables',
+//        	spec: 'map %repRing reduce %repRing over %s'
+        	spec: 'map %repRing reduce %repRing over %l %s' //%parallel'
+//            spec: 'map %repRing reduce %repRing over %file'
+        },
         doWait: {
             type: 'command',
             category: 'control',
@@ -4111,6 +4118,7 @@ SpriteMorph.prototype.blockTemplates = function (
         blocks.push(block('reportReshape'));
         blocks.push(block('reportCrossproduct'));
         blocks.push(block('reportParallelMap'));
+        blocks.push(block('reportMapReduce'));
 
         if (SpriteMorph.prototype.showingExtensions) {
             blocks.push('=');

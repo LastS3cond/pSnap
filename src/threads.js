@@ -10021,6 +10021,243 @@ Process.prototype.reportParallelMap = function(mapper, aList, aCount) {
             return 0;
         } 
 } 
+Process.prototype.reportParallelAdd = function(list, num) {
+	// Create an array of arrays, chunking by the supplied num.
+	// One worker per chunk is spawned to calculate the scalar
+	// sum of its values, and these sums are added together
+	// to get the final sum which is returned.
+
+	// At each runStep check to see if the workers are done.
+	// If so, return the resulting array and quit.
+
+	// Use the context input array to store the parallel job:
+	// [0] - list 
+	// [1] - num
+	// ------------------------------
+	// [2] - Parallel object
+	
+	let i, sum,
+		start, end,
+		chunk, rem,
+		new_list = [];
+	
+    let myWorker;
+
+	if (this.context.inputs.length < 3) {
+		chunk = Math.floor(list.length()/num);
+		rem = list.length() - chunk*num;
+		start = 0;
+		end = 0;
+		for (i=0; i<num; i++) {
+			start = end;
+			end = Math.min(end+chunk, list.length());
+			if (rem > 0) {
+				end++;
+				rem--;
+			}
+			new_list[i] = list.slice(start, end);
+		}
+        
+		myWorker = new Worker("parallel.js")
+        myWorker.postMessage("sum_list", new_list)
+
+    // Everything below is deprecated
+		this.context.inputs[2] = p;
+	} else {
+		p = this.context.inputs[2];
+		if (p.operation._resolved) {
+			sum = 0;
+			for (i=0; i<p.data.length; i++) {
+				sum = sum + p.data[i];
+			}
+			return sum;
+		}
+	}
+		
+	this.pushContext('doYield');
+	this.pushContext();
+	
+	/*
+	if (this.context.inputs.length < 3) {
+		f = function addNum(n) {return global.env.a + Number(n)};
+		p = new Parallel(list.asArray(), {env: {a: num}});
+		p.map(f);
+		this.context.inputs[2] = p;
+	} else {
+		p = this.context.inputs[2];
+		if (p.operation._resolved) {
+			return new List(p.data);
+		};
+	}
+	*/
+};
+
+Process.prototype.reportParallelMap = function(mapper, aList, aCount) {
+	// At each runStep check to see if the workers are done.
+	// If so, return the resulting array and quit.
+
+	// Use the context input array to store the parallel job:
+	// [0] - ringified reporter obj (mapper)
+	// [1] - list - assume aList points to a List and not an Array
+	// [2] - number of workers (default = #CPU's or 4)
+	// ------------------------------------------------------
+	// [3] - Parallel object
+	// [4] - isChunked
+	
+	var mFunction, anArray, body, workers, p, inputLists=[];
+
+	if (aList.length() == 0) return 0;
+	if (this.context.inputs.length < 4) {
+		workers = aCount.first || navigator.hardwareConcurrency || 4;
+		
+		if (aList.length() <= workers) {
+			p = new Parallel(aList.contents, {maxWorkers: workers});
+			body = 'return ' + mapper.expression.jsMappedCode() + ';';
+			mFunction = new Function(mapper.inputs[0], body);
+			p.map(mFunction);
+			this.context.inputs[4] = false;
+		} else {
+			// chunk the data
+			var len=aList.length(), div=Math.floor(len/workers), mod=len%workers, 
+				start=0, end=div, i, parm;
+			for (i=0; i<mod; i++) {
+				inputLists[i] = aList.slice(start, ++end);
+				start = end;
+				end += div;
+			}
+			for (i=mod; i<workers; i++) {
+				inputLists[i]=aList.slice(start,end);
+				start=end;
+				end+=div;
+			}
+			p = new Parallel(inputLists, {maxWorkers: workers});
+			parm = mapper.inputs[0];
+			body = 'var ' + parm + ', psnap_r=[]; ';
+			body += 'for (var psnap_i=0; psnap_i<psnap_l.length; psnap_i++) {';
+			body += parm + ' = psnap_l[psnap_i]; ';
+			body += 'psnap_r[psnap_i] = ' + mapper.expression.jsMappedCode() + ';}';
+			body += 'return psnap_r;'
+			mFunction = new Function('psnap_l', body);
+			function concat(d) {return d[0].concat(d[1]);};
+			p.map(mFunction);//.reduce(concat);
+			this.context.inputs[4] = true;
+		}
+		this.context.inputs[3] = p;
+	} else {
+		p = this.context.inputs[3];
+		if (p.operation._resolved) {
+			/**/
+			if (!this.context.inputs[4]) {
+				return new List(p.data);
+			}
+			var results = p.data[0];
+			for (i=1; i<p.data.length; i++)
+				results = results.concat(p.data[i]);
+			return new List(results);
+			/**/
+			//return new List(p.data);
+		};
+	}
+	
+	this.pushContext('doYield');
+	this.pushContext();
+};
+
+Process.prototype.reportMapReduce = function(mapper, reducer, aList, numWorkers) {
+	// At each runStep check to see if the workers are done.
+	// If so, return the resulting array and quit.
+
+	// Use the context input array to store the parallel job:
+	// [0] - ringified reporter obj (mapper)
+	// [1] - ringified reporter obj (reducer)
+	// [2] - list
+	// [3] - number of workers (default = #CPU's or 4)
+	// ------------------------------------------------------
+	// [4] - Parallel object
+	// [5] - isChunked
+
+	var mFunction, rFunction, anArray, body, workers, p, inputLists=[];
+
+	if (aList.length() == 0) return 0;
+	if (this.context.inputs.length < 5) {
+		workers = numWorkers.first || navigator.hardwareConcurrency || 4;
+		
+		if (aList.length() <= workers) {
+			p = new Parallel(aList.contents, {maxWorkers: workers});
+			body = 'return ' + mapper.expression.mappedCode() + ';';
+			mFunction = new Function(mapper.inputs[0], body);
+			p.map(mFunction);
+			this.context.inputs[5] = false;
+		} else {
+			// chunk the data
+			var len=aList.length(), div=Math.floor(len/workers), mod=len%workers, 
+				start=0, end=div, i, parm;
+			for (i=0; i<mod; i++) {
+				inputLists[i] = aList.slice(start, ++end);
+				start = end;
+				end += div;
+			}
+			for (i=mod; i<workers; i++) {
+				inputLists[i]=aList.slice(start,end);
+				start=end;
+				end+=div;
+			}
+			p = new Parallel(inputLists, {maxWorkers: workers});
+			parm = mapper.inputs[0];
+			body = 'var ' + parm + ', psnap_r=[]; ';
+			body += 'for (var psnap_i=0; psnap_i<psnap_l.length; psnap_i++) {';
+			body += parm + ' = psnap_l[psnap_i];';
+			body += 'psnap_r[psnap_i] = ' + mapper.expression.mappedCode() + ';}';
+			body += 'return psnap_r;'
+			mFunction = new Function('psnap_l', body);
+			body = reducer.expression.mappedCode();
+			//need to finish this - results need 2 stages of reducing (dependent!)
+			function concat(d) {return d[0].concat(d[1]);};
+			p.map(mFunction).reduce(rFunction).reduce(concat);
+			this.context.inputs[5] = true;
+		}
+		this.context.inputs[4] = p;
+	} else {
+		p = this.context.inputs[4];
+		if (p.operation._resolved) {
+			return new List(p.data);
+		};
+	}
+	
+	this.pushContext('doYield');
+	this.pushContext();
+		
+		
+		/*
+		body = 'return ' + mapper.expression.mappedCode() + ';';
+		aFunction = new Function(mapper.inputs[0], body);
+
+		if (aList instanceof List) {
+			p = new Parallel(aList.asArray());
+		} else {
+			p = new Parallel(aList);
+		}
+		p.map(aFunction);
+		this.context.inputs[3] = p;
+		this.pushContext('doYield');
+		this.pushContext();
+	} else if (this.context.mapped) {
+		this.returnValueToParentContext(this.context.inputs[4]);
+		return;
+	} else {
+		p = this.context.inputs[3];
+		if (p.operation._resolved) {
+			this.context.mapped = true;
+//			return new List(p.data);
+			this.pushContext();
+			this.evaluate(reducer, new List([new List(p.data)]));
+		} else {
+			this.pushContext('doYield');
+			this.pushContext();
+		}
+	}
+	*/
+};
 
 // Context /////////////////////////////////////////////////////////////
 

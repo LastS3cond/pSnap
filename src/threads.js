@@ -10092,76 +10092,74 @@ Process.prototype.reportParallelAdd = function(list, num) {
 	*/
 };
 
-Process.prototype.reportParallelMap = function(mapper, aList, aCount) {
-	// At each runStep check to see if the workers are done.
-	// If so, return the resulting array and quit.
+function createWorkers(n) {
+    const workers = [];
+    for (let i = 0; i < n; i++) {
+        workers.push(new Worker('parallel.js'));
+    }
+    return workers;
+}
 
-	// Use the context input array to store the parallel job:
-	// [0] - ringified reporter obj (mapper)
-	// [1] - list - assume aList points to a List and not an Array
-	// [2] - number of workers (default = #CPU's or 4)
-	// ------------------------------------------------------
-	// [3] - Parallel object
-	// [4] - isChunked
-	
-	var mFunction, anArray, body, workers, p, inputLists=[];
+function chunk(list, nChunks) {
+    const size = Math.ceil(list.length / nChunks);
+    const chunks = [];
+    for (let i = 0; i < list.length; i += size) {
+        chunks.push(list.slice(i, i + size));
+    }
+    return chunks;
+}
 
-	if (aList.length() == 0) return 0;
-	if (this.context.inputs.length < 4) {
-		workers = aCount.first || navigator.hardwareConcurrency || 4;
-		
-		if (aList.length() <= workers) {
-			p = new Parallel(aList.contents, {maxWorkers: workers});
-			body = 'return ' + mapper.expression.jsMappedCode() + ';';
-			mFunction = new Function(mapper.inputs[0], body);
-			p.map(mFunction);
-			this.context.inputs[4] = false;
-		} else {
-			// chunk the data
-			var len=aList.length(), div=Math.floor(len/workers), mod=len%workers, 
-				start=0, end=div, i, parm;
-			for (i=0; i<mod; i++) {
-				inputLists[i] = aList.slice(start, ++end);
-				start = end;
-				end += div;
-			}
-			for (i=mod; i<workers; i++) {
-				inputLists[i]=aList.slice(start,end);
-				start=end;
-				end+=div;
-			}
-			p = new Parallel(inputLists, {maxWorkers: workers});
-			parm = mapper.inputs[0];
-			body = 'var ' + parm + ', psnap_r=[]; ';
-			body += 'for (var psnap_i=0; psnap_i<psnap_l.length; psnap_i++) {';
-			body += parm + ' = psnap_l[psnap_i]; ';
-			body += 'psnap_r[psnap_i] = ' + mapper.expression.jsMappedCode() + ';}';
-			body += 'return psnap_r;'
-			mFunction = new Function('psnap_l', body);
-			function concat(d) {return d[0].concat(d[1]);};
-			p.map(mFunction);//.reduce(concat);
-			this.context.inputs[4] = true;
-		}
-		this.context.inputs[3] = p;
-	} else {
-		p = this.context.inputs[3];
-		if (p.operation._resolved) {
-			/**/
-			if (!this.context.inputs[4]) {
-				return new List(p.data);
-			}
-			var results = p.data[0];
-			for (i=1; i<p.data.length; i++)
-				results = results.concat(p.data[i]);
-			return new List(results);
-			/**/
-			//return new List(p.data);
-		};
-	}
-	
-	this.pushContext('doYield');
-	this.pushContext();
-};
+function parallelMap(workers, list, mapperCode) {
+    const chunks = chunk(list, workers.length);
+
+    return Promise.all(
+        chunks.map((chunk, i) =>
+            new Promise(resolve => {
+                // worker responds with mapped result
+                workers[i].onmessage = msg => resolve(msg.data.result);
+
+                // send chunk and mapper code
+                workers[i].postMessage({
+                    type: 'map',
+                    data: chunk,
+                    mapperCode
+                });
+            })
+        )
+    ).then(mappedChunks => mappedChunks.flat());
+}
+
+Process.prototype.reportParallelMap = async function(mapper, aList, numWorkers) {
+    if (aList.length() === 0)
+        {
+            return new List()
+        } 
+
+    // number of workers / default 4 
+    const workerCount = numWorkers?.first || navigator.hardwareConcurrency || 4;
+    
+    // if workerCount > than list, minimize overhead by not starting up unnecessary threads 
+    workerCount = Math.min(workerCount, aList.length);
+
+
+    // create Web Workers
+    const workers = createWorkers(workerCount);
+
+    // get the mapper function body as string
+    const mapperCode = mapper.expression.jsMappedCode();
+
+    // run parallel map
+    const resultArray = await parallelMap(workers, aList.contents, mapperCode);
+
+    // terminate workers 
+    workers.forEach(w => w.terminate());
+
+    // new Snap List
+    return new List(resultArray);
+}
+
+
+
 
 Process.prototype.reportMapReduce = function(mapper, reducer, aList, numWorkers) {
 	// At each runStep check to see if the workers are done.

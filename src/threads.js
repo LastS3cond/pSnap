@@ -10092,6 +10092,12 @@ Process.prototype.reportParallelAdd = function(list, num) {
 	*/
 };
 
+
+//
+//
+// PARALLEL THREAD CREATION CODE 
+//
+//
 function createWorkers(n) {
     const workers = [];
     for (let i = 0; i < n; i++) {
@@ -10108,6 +10114,11 @@ function chunk(list, nChunks) {
     }
     return chunks;
 }
+//
+//
+// 
+//
+//
 
 function parallelMap(workers, list, mapperCode) {
     const chunks = chunk(list, workers.length);

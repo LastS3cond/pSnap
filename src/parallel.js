@@ -1,5 +1,6 @@
 
 self.onmessage = (msg) => {
+    console.log('[Worker] Received data:', msg.data);
     const { type, data, mapperCode, reducerCode } = msg.data;
 
     if (type === 'map') {

@@ -10092,16 +10092,58 @@ Process.prototype.reportParallelAdd = function(list, num) {
 	*/
 };
 
+//
+// 1. FIXED ASYNC HELPER (Uses inputs to store state)
+//
+Process.prototype.awaitPromise = function(promiseGenerator) {
+    // We use the 4th slot (index 3) of the inputs array to store our state object.
+    // This persists across yields, whereas 'this.context.myVar' does not.
+    var state = this.context.inputs[3];
+
+    // Initialize state if it doesn't exist
+    if (!state) {
+        state = { 
+            started: false, 
+            done: false, 
+            result: null 
+        };
+        this.context.inputs[3] = state;
+    }
+
+    // If we are done, return the result!
+    if (state.done) {
+        return state.result;
+    }
+
+    // If not started, start the job
+    if (!state.started) {
+        state.started = true;
+        
+        promiseGenerator()
+            .then(result => {
+                state.result = result;
+                state.done = true;
+            })
+            .catch(err => {
+                console.error("Async Error:", err);
+                state.result = new window.List([]); 
+                state.done = true;
+            });
+    }
+
+    // Pause and retry in the next frame
+    this.pushContext('doYield');
+    this.pushContext(); 
+    return null; 
+};
 
 //
-//
-// PARALLEL THREAD CREATION CODE 
-//
+// 2. WORKER HELPERS (Keep these the same)
 //
 function createWorkers(n) {
     const workers = [];
     for (let i = 0; i < n; i++) {
-        workers.push(new Worker('parallel.js'));
+        workers.push(new Worker('./src/parallel.js'));
     }
     return workers;
 }
@@ -10114,63 +10156,48 @@ function chunk(list, nChunks) {
     }
     return chunks;
 }
-//
-//
-// 
-//
-//
 
 function parallelMap(workers, list, mapperCode) {
     const chunks = chunk(list, workers.length);
-
     return Promise.all(
-        chunks.map((chunk, i) =>
-            new Promise(resolve => {
-                // worker responds with mapped result
-                workers[i].onmessage = msg => resolve(msg.data.result);
+        workers.map((worker, i) => { 
+            const chunkData = chunks[i];
+            if (!chunkData) return Promise.resolve([]); 
 
-                // send chunk and mapper code
-                workers[i].postMessage({
+            return new Promise(resolve => {
+                worker.onmessage = msg => resolve(msg.data.result); 
+                worker.postMessage({
                     type: 'map',
-                    data: chunk,
+                    data: chunkData,
                     mapperCode
                 });
-            })
-        )
+            });
+        })
     ).then(mappedChunks => mappedChunks.flat());
 }
 
-Process.prototype.reportParallelMap = async function(mapper, aList, numWorkers) {
-    if (aList.length() === 0)
-        {
-            return new List()
-        } 
+//
+// 3. REPORTER FUNCTION (Updated for safe Input handling)
+//
+Process.prototype.reportParallelMap = function(mapper, aList, numWorkers) {
+    if (aList.length() === 0) return new window.List();
 
-    // number of workers / default 4 
-    const workerCount = numWorkers?.first || navigator.hardwareConcurrency || 4;
-    
-    // if workerCount > than list, minimize overhead by not starting up unnecessary threads 
-    workerCount = Math.min(workerCount, aList.length);
+    return this.awaitPromise(() => {
+        // Handle input safely (in case numWorkers is an object/input slot)
+        const countInput = (typeof numWorkers === 'object') ? numWorkers.first : numWorkers;
+        const workerCount = countInput || 4;
+        
+        const correctWorkerCount = Math.min(workerCount, aList.length);
+        const workers = createWorkers(correctWorkerCount);
+        const mapperCode = 'return ' + mapper.expression.mappedCode() + ';';
 
-
-    // create Web Workers
-    const workers = createWorkers(workerCount);
-
-    // get the mapper function body as string
-    const mapperCode = mapper.expression.jsMappedCode();
-
-    // run parallel map
-    const resultArray = await parallelMap(workers, aList.contents, mapperCode);
-
-    // terminate workers 
-    workers.forEach(w => w.terminate());
-
-    // new Snap List
-    return new List(resultArray);
-}
-
-
-
+        return parallelMap(workers, aList.contents, mapperCode)
+            .then(resultArray => {
+                workers.forEach(w => w.terminate());
+                return new window.List(resultArray);
+            });
+    });
+};
 
 Process.prototype.reportMapReduce = function(mapper, reducer, aList, numWorkers) {
 	// At each runStep check to see if the workers are done.

@@ -1269,6 +1269,11 @@ SpriteMorph.prototype.primitiveBlocks = function () {
                 (run (item (+ (get condition) 1)
                     (list (get "false case") (get "true case")))))`
         },
+        reportGetVar: {
+            type: 'reporter',
+            category: 'variables',
+            spec: '%v'
+        },
         reportIfElse: {
             type: 'reporter',
             category: 'control',
@@ -3582,6 +3587,10 @@ SpriteMorph.prototype.blockForSelector = function (selector, setDefaults) {
     var migration, info, block, defaults, inputs, i;
     migration = this.blockMigrations[selector];
     info = this.blocks[migration ? migration.selector : selector];
+    if (!info) {
+        console.warn('Block not found for selector:', selector);
+        return null;
+    }
     if (!info) {return null; }
     if (info.definition instanceof CustomBlockDefinition) {
         // overload primitive with global custom block

@@ -10015,12 +10015,6 @@ Process.prototype.reportDigitalReading = function (pin, booleanValue) {
     );
 };
 
-Process.prototype.reportParallelMap = function(mapper, aList, aCount) {
-    if (aList.length() === 0) 
-        {
-            return 0;
-        } 
-} 
 Process.prototype.reportParallelAdd = function(list, num) {
 	// Create an array of arrays, chunking by the supplied num.
 	// One worker per chunk is spawned to calculate the scalar
@@ -10090,111 +10084,191 @@ Process.prototype.reportParallelAdd = function(list, num) {
 		};
 	}
 	*/
+};// ========================================================================
+// 1. EMBEDDED WORKER SOURCE
+//    (This fixes the 404 error by creating the worker from a string)
+// ========================================================================
+const workerSource = `
+self.onmessage = function(e) {
+    const msg = e.data;
+    
+    // Resilience: Handle old and new naming conventions
+    const type = msg.type || msg.command;
+    const code = msg.mapperCode || msg.code; 
+    const args = msg.args || ['item'];
+    const data = msg.data;
+
+    try {
+        if (type === 'map') {
+            // Create the function dynamically: new Function(argName, body)
+            const mapper = new Function(...args, code);
+            
+            // Execute map
+            const result = data.map(item => mapper(item));
+            
+            self.postMessage({ result: result });
+        }
+    } catch (err) {
+        // Return error as string to prevent Snap! from hanging
+        self.postMessage({ error: err.toString() });
+    }
 };
+`;
 
-//
-// 1. FIXED ASYNC HELPER (Uses inputs to store state)
-//
-Process.prototype.awaitPromise = function(promiseGenerator) {
-    // We use the 4th slot (index 3) of the inputs array to store our state object.
-    // This persists across yields, whereas 'this.context.myVar' does not.
-    var state = this.context.inputs[3];
+const workerBlob = new Blob([workerSource], { type: 'application/javascript' });
+const workerUrl = URL.createObjectURL(workerBlob);
 
-    // Initialize state if it doesn't exist
-    if (!state) {
-        state = { 
-            started: false, 
-            done: false, 
-            result: null 
-        };
-        this.context.inputs[3] = state;
-    }
 
-    // If we are done, return the result!
-    if (state.done) {
-        return state.result;
-    }
+// ------------------------------------------------------------------------
+// 2. HELPER FUNCTIONS
+// ------------------------------------------------------------------------
 
-    // If not started, start the job
-    if (!state.started) {
-        state.started = true;
-        
-        promiseGenerator()
-            .then(result => {
-                state.result = result;
-                state.done = true;
-            })
-            .catch(err => {
-                console.error("Async Error:", err);
-                state.result = new window.List([]); 
-                state.done = true;
-            });
-    }
-
-    // Pause and retry in the next frame
-    this.pushContext('doYield');
-    this.pushContext(); 
-    return null; 
-};
-
-//
-// 2. WORKER HELPERS (Keep these the same)
-//
 function createWorkers(n) {
     const workers = [];
     for (let i = 0; i < n; i++) {
-        workers.push(new Worker('./src/parallel.js'));
+        workers.push(new Worker(workerUrl));
     }
     return workers;
 }
 
-function chunk(list, nChunks) {
-    const size = Math.ceil(list.length / nChunks);
+function chunk(array, nChunks) {
+    const size = Math.ceil(array.length / nChunks);
     const chunks = [];
-    for (let i = 0; i < list.length; i += size) {
-        chunks.push(list.slice(i, i + size));
+    for (let i = 0; i < array.length; i += size) {
+        chunks.push(array.slice(i, i + size));
     }
     return chunks;
 }
 
-function parallelMap(workers, list, mapperCode) {
-    const chunks = chunk(list, workers.length);
+function parallelMap(workers, jsArray, mapperBody, paramNames) {
+    const chunks = chunk(jsArray, workers.length);
+    
     return Promise.all(
-        workers.map((worker, i) => { 
+        workers.map((worker, i) => {
             const chunkData = chunks[i];
-            if (!chunkData) return Promise.resolve([]); 
+            
+            // If more workers than chunks, resolve empty immediately
+            if (!chunkData || chunkData.length === 0) return Promise.resolve([]);
 
-            return new Promise(resolve => {
-                worker.onmessage = msg => resolve(msg.data.result); 
+            return new Promise((resolve, reject) => {
+                worker.onmessage = msg => {
+                    if (msg.data.error) reject(new Error(msg.data.error));
+                    else resolve(msg.data.result);
+                };
+                worker.onerror = err => reject(err);
+
                 worker.postMessage({
                     type: 'map',
                     data: chunkData,
-                    mapperCode
+                    mapperCode: mapperBody,
+                    args: paramNames
                 });
             });
         })
     ).then(mappedChunks => mappedChunks.flat());
 }
 
-//
-// 3. REPORTER FUNCTION (Updated for safe Input handling)
-//
-Process.prototype.reportParallelMap = function(mapper, aList, numWorkers) {
-    if (aList.length() === 0) return new window.List();
 
+// ------------------------------------------------------------------------
+// 3. PROCESS PROTOTYPE EXTENSIONS
+// ------------------------------------------------------------------------
+
+// A generic awaiter for Promises within the Snap! Loop
+Process.prototype.awaitPromise = function (promiseGenerator) {
+    // Use input slot 3 (temp storage) to persist state across frames
+    var state = this.context.inputs[3];
+
+    // Initialize
+    if (!state) {
+        state = { 
+            started: false, 
+            done: false, 
+            result: null, 
+            error: null 
+        };
+        this.context.inputs[3] = state;
+    }
+
+    // Return if done
+    if (state.done) {
+        if (state.error) this.throwError(state.error);
+        return state.result;
+    }
+
+    // Start Promise
+    if (!state.started) {
+        state.started = true;
+        try {
+            promiseGenerator()
+                .then(result => {
+                    state.result = result;
+                    state.done = true;
+                })
+                .catch(err => {
+                    state.error = err;
+                    state.done = true;
+                });
+        } catch (e) {
+            state.error = e;
+            state.done = true;
+        }
+    }
+
+    // Yield execution to keep UI responsive
+    this.pushContext('doYield');
+    this.pushContext();
+    return null;
+};
+
+Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
+    this.assertType(list, 'list');
+    if (list.length() === 0) return new List();
+
+    // 1. Setup Configuration
+    const countInput = (typeof numWorkers === 'object' && numWorkers) ? numWorkers.evaluate() : numWorkers;
+    const workerCount = Number(countInput) || navigator.hardwareConcurrency || 4;
+    const correctWorkerCount = Math.min(workerCount, list.length());
+    
+    const paramNames = ['item']; 
+    
+    // 2. Transpile Code (Generate JS string)
+    // Note: We access expression directly if available, or fallback to the mapper itself
+    const blockToTranspile = mapper.expression || mapper;
+    
+    // DEBUGGING LOGS
+    console.log('Transpiling block:', blockToTranspile.selector);
+    
+    let jsCode;
+    try {
+        // --- FIX: CHECK FOR THE NEW METHOD NAME ---
+        if (typeof blockToTranspile.transpileForWorker !== 'function') {
+            // Fallback warning if js_mappings.js hasn't been loaded or updated
+            console.warn("Custom transpiler not found. Ensure js_mappings.js is loaded.");
+            throw new Error("Transpiler missing: 'transpileForWorker'");
+        }
+
+        // --- FIX: CALL THE NEW METHOD ---
+        jsCode = blockToTranspile.transpileForWorker(paramNames);
+
+    } catch (e) {
+        this.throwError('Transpilation Error: ' + e.message);
+        return;
+    }
+
+    const fullBody = `return ${jsCode};`;
+    const jsArray = list.itemsArray();
+
+    console.log('Generated Body:', fullBody);
+
+    // 3. Run execution inside awaitPromise
     return this.awaitPromise(() => {
-        // Handle input safely (in case numWorkers is an object/input slot)
-        const countInput = (typeof numWorkers === 'object') ? numWorkers.first : numWorkers;
-        const workerCount = countInput || 4;
-        
-        const correctWorkerCount = Math.min(workerCount, aList.length);
         const workers = createWorkers(correctWorkerCount);
-        const mapperCode = 'return ' + mapper.expression.mappedCode() + ';';
 
-        return parallelMap(workers, aList.contents, mapperCode)
+        return parallelMap(workers, jsArray, fullBody, paramNames)
             .then(resultArray => {
+                // Cleanup
                 workers.forEach(w => w.terminate());
-                return new window.List(resultArray);
+                return new List(resultArray);
             });
     });
 };

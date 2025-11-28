@@ -1,43 +1,37 @@
+self.onmessage = function(e) {
+    const msg = e.data;
 
-self.onmessage = (msg) => {
-    console.log('[Worker] Received data:', msg.data);
-    const { type, data, mapperCode, reducerCode } = msg.data;
+    // 1. Extract properties flexibly to match threads.js
+    // threads.js might send 'command' (new way) or 'type' (old way)
+    const operation = msg.command || msg.type;
+    
+    // threads.js might send 'code' (new way) or 'mapperCode' (old way)
+    const functionBody = msg.code || msg.mapperCode;
+    
+    // threads.js sends 'args' (e.g. ['x']), defaults to ['item'] if missing
+    const paramNames = msg.args || ['item'];
+    
+    const data = msg.data;
 
-    if (type === 'map') {
-        const mapper = new Function('item', mapperCode);
-        const result = data.map(item => mapper(item));
-        self.postMessage({ type: 'mapResult', result });
-    }
+    try {
+        if (operation === 'map') {
+            // 2. Create the function dynamically with the correct parameter name
+            // equivalent to: new Function('x', 'return x + 5;')
+            const mapper = new Function(...paramNames, functionBody);
 
-    if (type === 'reduce') {
-        const reducer = new Function('a', 'b', reducerCode);
-        let acc = data[0];
-        for (let i = 1; i < data.length; i++) {
-            acc = reducer(acc, data[i]);
+            // 3. Execute the map
+            const result = data.map(item => mapper(item));
+
+            // 4. Send back success
+            self.postMessage({ result: result });
         }
-        self.postMessage({ type: 'reduceResult', result: acc });
+        else if (operation === 'reduce') {
+             // Logic for reduce if you implement it later
+             const reducer = new Function(paramNames[0], paramNames[1], functionBody);
+             // ... reduce logic
+        }
+    } catch (error) {
+        // 5. Send back errors so Snap! doesn't just hang on "undefined"
+        self.postMessage({ error: error.toString() });
     }
 };
-
-
-// self.onmessage = (msg) => {
-//     type = msg.data['type']
-//     data = msg.data['data']
-//     if(type == 'sum_list')
-//     {
-//         self.postMessage(sum_list(data))
-//     }
-// }
-  
-
-// function sum_list(l) {
-//     let i, sum = 0;
-//     if (l instanceof Array) {
-//         for (i=0 ; i<l.length; i++) {
-//             sum = sum + Number(l[i]);
-//         }
-//         return sum;
-//     } else {
-//         return l;
-//     }
-// }

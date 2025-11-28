@@ -7887,6 +7887,280 @@ ReporterBlockMorph.prototype.drawEdges = function (ctx) {
         this.drawEdgesOval(ctx);
     }
 };
+// Make sure you've imported the selector
+
+// // Convenience method to get the full mapper code with return statement
+// ReporterBlockMorph.prototype.mappedCode = function(paramNames = ['item']) {
+//     return this.transpileReporter(paramNames);
+// };
+// BlockMorph.prototype.toJSExpression = function(paramNames = ['item']) {
+//     if (this instanceof ReporterBlockMorph) {
+//         return this.transpileReporter(paramNames);
+//     }
+//     return 'item';
+// };
+
+// // Main transpilation method for reporter blocks
+// ReporterBlockMorph.prototype.transpileReporter = function(paramNames = ['item']) {
+//     const selector = this.selector;
+//     const inputs = this.inputs();
+
+//     switch (selector) {
+//         // Arithmetic operations
+//         case 'reportSum':
+//             return this.transpileBinaryOp('+', inputs, paramNames);
+        
+//         case 'reportDifference':
+//             return this.transpileBinaryOp('-', inputs, paramNames);
+        
+//         case 'reportProduct':
+//             return this.transpileBinaryOp('*', inputs, paramNames);
+        
+//         case 'reportQuotient':
+//             return this.transpileBinaryOp('/', inputs, paramNames);
+        
+//         case 'reportModulus':
+//             return this.transpileBinaryOp('%', inputs, paramNames);
+        
+//         case 'reportPower':
+//             return `Math.pow(${this.transpileInput(inputs[0], paramNames)}, ${this.transpileInput(inputs[1], paramNames)})`;
+
+//         // Comparison operations
+//         case 'reportEquals':
+//             return `(${this.transpileInput(inputs[0], paramNames)} === ${this.transpileInput(inputs[1], paramNames)})`;
+        
+//         case 'reportLessThan':
+//             return `(${this.transpileInput(inputs[0], paramNames)} < ${this.transpileInput(inputs[1], paramNames)})`;
+        
+//         case 'reportGreaterThan':
+//             return `(${this.transpileInput(inputs[0], paramNames)} > ${this.transpileInput(inputs[1], paramNames)})`;
+
+//         // Logical operations
+//         case 'reportAnd':
+//             return `(${this.transpileInput(inputs[0], paramNames)} && ${this.transpileInput(inputs[1], paramNames)})`;
+        
+//         case 'reportOr':
+//             return `(${this.transpileInput(inputs[0], paramNames)} || ${this.transpileInput(inputs[1], paramNames)})`;
+        
+//         case 'reportNot':
+//             return `!(${this.transpileInput(inputs[0], paramNames)})`;
+
+//         // Math functions
+//         case 'reportMonadic':
+//             return this.transpileMonadic(inputs, paramNames);
+        
+//         case 'reportRound':
+//             return `Math.round(${this.transpileInput(inputs[0], paramNames)})`;
+        
+//         case 'reportRandom':
+//             const min = this.transpileInput(inputs[0], paramNames);
+//             const max = this.transpileInput(inputs[1], paramNames);
+//             return `(Math.floor(Math.random() * ((${max}) - (${min}) + 1)) + (${min}))`;
+
+//         // Variable access
+//         case 'reportGetVar':
+//             return this.transpileVariable(paramNames);
+
+//         // List operations
+//         case 'reportListItem':
+//             return this.transpileListAccess(inputs, paramNames);
+        
+//         case 'reportListLength':
+//             return `(${this.transpileInput(inputs[0], paramNames)}).length`;
+        
+//         case 'reportListContainsItem':
+//             return `(${this.transpileInput(inputs[1], paramNames)}).includes(${this.transpileInput(inputs[0], paramNames)})`;
+
+//         // String operations
+//         case 'reportJoinWords':
+//             return this.transpileJoin(inputs, paramNames);
+        
+//         case 'reportTextFunction':
+//             return this.transpileTextFunction(inputs, paramNames);
+        
+//         case 'reportLetter':
+//             const idx = this.transpileInput(inputs[0], paramNames);
+//             const str = this.transpileInput(inputs[1], paramNames);
+//             return `String(${str})[(${idx}) - 1]`; // 1-based to 0-based
+        
+//         case 'reportStringSize':
+//             return `String(${this.transpileInput(inputs[0], paramNames)}).length`;
+
+//         // Ternary / conditional
+//         case 'reportIfElse':
+//             return `((${this.transpileInput(inputs[0], paramNames)}) ? (${this.transpileInput(inputs[1], paramNames)}) : (${this.transpileInput(inputs[2], paramNames)}))`;
+
+//         // Identity / passthrough
+//         case 'reifyReporter':
+//         case 'reifyPredicate':
+//             if (inputs.length > 0) {
+//                 return this.transpileInput(inputs[0], paramNames);
+//             }
+//             return 'item';
+
+//         default:
+//             console.warn('Unknown selector:', selector);
+//             return 'item';
+//     }
+// };
+
+// // Transpile binary operations
+// ReporterBlockMorph.prototype.transpileBinaryOp = function(op, inputs, paramNames) {
+//     const left = this.transpileInput(inputs[0], paramNames);
+//     const right = this.transpileInput(inputs[1], paramNames);
+//     return `(${left} ${op} ${right})`;
+// };
+
+// // Transpile monadic math functions
+// ReporterBlockMorph.prototype.transpileMonadic = function(inputs, paramNames) {
+//     const funcInput = inputs[0];
+//     const valueInput = inputs[1];
+    
+//     let funcName;
+//     if (funcInput instanceof InputSlotMorph) {
+//         funcName = funcInput.evaluate();
+//         if (funcName instanceof Array) {
+//             funcName = funcName[0];
+//         }
+//     } else {
+//         funcName = 'id';
+//     }
+    
+//     const value = this.transpileInput(valueInput, paramNames);
+    
+//     const mathFuncs = {
+//         'abs': `Math.abs(${value})`,
+//         'neg': `(-(${value}))`,
+//         'sign': `Math.sign(${value})`,
+//         'ceiling': `Math.ceil(${value})`,
+//         'floor': `Math.floor(${value})`,
+//         'sqrt': `Math.sqrt(${value})`,
+//         'sin': `Math.sin(${value})`,
+//         'cos': `Math.cos(${value})`,
+//         'tan': `Math.tan(${value})`,
+//         'asin': `Math.asin(${value})`,
+//         'acos': `Math.acos(${value})`,
+//         'atan': `Math.atan(${value})`,
+//         'ln': `Math.log(${value})`,
+//         'log': `Math.log10(${value})`,
+//         'lg': `Math.log2(${value})`,
+//         'e^': `Math.exp(${value})`,
+//         '10^': `Math.pow(10, ${value})`,
+//         '2^': `Math.pow(2, ${value})`,
+//         'id': value
+//     };
+    
+//     return mathFuncs[funcName] || value;
+// };
+
+// // Transpile variable access
+// ReporterBlockMorph.prototype.transpileVariable = function(paramNames) {
+//     const varName = this.blockSpec;
+    
+//     // Check if it's a parameter
+//     if (paramNames.includes(varName)) {
+//         return varName;
+//     }
+    
+//     // For captured variables, we need to reference them
+//     // This assumes they'll be available in the worker's scope
+//     return varName;
+// };
+
+// // Transpile list item access
+// ReporterBlockMorph.prototype.transpileListAccess = function(inputs, paramNames) {
+//     const index = this.transpileInput(inputs[0], paramNames);
+//     const list = this.transpileInput(inputs[1], paramNames);
+//     return `(${list})[(${index}) - 1]`; // Snap uses 1-based indexing
+// };
+
+// // Transpile string join
+// ReporterBlockMorph.prototype.transpileJoin = function(inputs, paramNames) {
+//     const left = this.transpileInput(inputs[0], paramNames);
+//     const right = this.transpileInput(inputs[1], paramNames);
+//     return `(String(${left}) + String(${right}))`;
+// };
+
+// // Transpile text functions
+// ReporterBlockMorph.prototype.transpileTextFunction = function(inputs, paramNames) {
+//     const funcInput = inputs[0];
+//     const textInput = inputs[1];
+    
+//     let funcName;
+//     if (funcInput instanceof InputSlotMorph) {
+//         funcName = funcInput.evaluate();
+//         if (funcName instanceof Array) {
+//             funcName = funcName[0];
+//         }
+//     }
+    
+//     const text = this.transpileInput(textInput, paramNames);
+    
+//     const textFuncs = {
+//         'length': `String(${text}).length`,
+//         'lower case': `String(${text}).toLowerCase()`,
+//         'upper case': `String(${text}).toUpperCase()`
+//     };
+    
+//     return textFuncs[funcName] || text;
+// };
+
+// // Transpile any input (recursively handles nested blocks)
+// ReporterBlockMorph.prototype.transpileInput = function(input, paramNames) {
+//     if (!input) {
+//         return 'undefined';
+//     }
+
+//     // If it's a reporter block, recursively transpile it
+//     if (input instanceof ReporterBlockMorph) {
+//         return input.transpileReporter(paramNames);
+//     } 
+    
+//     // If it's an input slot, get its value
+//     if (input instanceof InputSlotMorph) {
+//         const value = input.evaluate();
+        
+//         // Handle constants
+//         if (typeof value === 'string') {
+//             return JSON.stringify(value);
+//         }
+//         if (typeof value === 'number') {
+//             return String(value);
+//         }
+//         if (typeof value === 'boolean') {
+//             return String(value);
+//         }
+//         if (value instanceof Array) {
+//             // Handle dropdown selections
+//             return JSON.stringify(value[0]);
+//         }
+        
+//         return String(value);
+//     } 
+    
+//     // If it's a template slot (parameter)
+//     if (input instanceof TemplateSlotMorph) {
+//         const varName = input.contents();
+//         return paramNames.includes(varName) ? varName : `"${varName}"`;
+//     }
+    
+//     // If it's a boolean slot
+//     if (input instanceof BooleanSlotMorph) {
+//         const value = input.evaluate();
+//         return String(value);
+//     }
+    
+//     // If it's a multi-arg morph, handle the first visible input
+//     if (input instanceof MultiArgMorph) {
+//         const firstInput = input.inputs()[0];
+//         if (firstInput) {
+//             return this.transpileInput(firstInput, paramNames);
+//         }
+//     }
+
+//     // Default fallback
+//     return 'item';
+// };
 
 ReporterBlockMorph.prototype.drawEdgesOval = function (ctx) {
     // add 3D-Effect

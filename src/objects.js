@@ -1150,15 +1150,22 @@ SpriteMorph.prototype.primitiveBlocks = function () {
         reportParallelMap: {
         	type: 'reporter',
         	category: 'variables',
-        	spec: 'parallelMap %repRing over %l %n'//%parallel'
+        	spec: 'parallelMap %repRing over %l %n',//%parallel'
+            defaults: [null, null, 4] 
         },
         reportMapReduce: {
-        	type: 'reporter',
-        	category: 'variables',
-//        	spec: 'map %repRing reduce %repRing over %s'
-        	spec: 'map %repRing reduce %repRing over %l %n' //%parallel'
-//            spec: 'map %repRing reduce %repRing over %file'
+            type: 'reporter',
+            category: 'variables',
+            spec: 'map %repRing reduce %repRing over %l with %n workers',
+            defaults: [null, null, null, 4] 
         },
+//         reportMapReduce: {
+//         	type: 'reporter',
+//         	category: 'variables',
+// //        	spec: 'map %repRing reduce %repRing over %s'
+//         	spec: 'map %repRing reduce %repRing over %l %n' //%parallel'
+// //            spec: 'map %repRing reduce %repRing over %file'
+//         },
         doWait: {
             type: 'command',
             category: 'control',

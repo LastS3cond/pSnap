@@ -10158,9 +10158,7 @@ function chunk(array, nChunks) {
 
 
 Process.prototype.awaitPromise = function (promiseGenerator) {
-
     var state = this.context.asyncState;
-
     if (!state) {
         state = { 
             started: false, 
@@ -10201,17 +10199,15 @@ Process.prototype.awaitPromise = function (promiseGenerator) {
 
 
 
-// Updated signature to accept Reducer code
 function parallelMap(workers, jsArray, mapperBody, mapParams, reducerBody, reduceParams) {
     const chunks = chunk(jsArray, workers.length);
-    
     return Promise.all(
         workers.map((worker, i) => {
             const chunkData = chunks[i];
             const workerId = i + 1;
             
             if (!worker || !chunkData || chunkData.length === 0) {
-                return Promise.resolve(null); // Return null for empty chunks
+                return Promise.resolve(null); 
             }
 
             return new Promise((resolve, reject) => {
@@ -10222,7 +10218,6 @@ function parallelMap(workers, jsArray, mapperBody, mapParams, reducerBody, reduc
                         console.log('%c[Worker ' + workerId + ']', 'color: cyan', payload.message);
                     }
                     else if (payload.type === 'result') {
-                        // If worker says it was empty, resolve null
                         if (payload.empty) resolve(null);
                         else resolve(payload.result);
                     }
@@ -10232,22 +10227,19 @@ function parallelMap(workers, jsArray, mapperBody, mapParams, reducerBody, reduc
                 };
 
                 worker.onerror = err => reject(err);
-
                 worker.postMessage({
                     type: 'map',
                     id: workerId,
                     data: chunkData,
                     mapperCode: mapperBody,
                     args: mapParams,
-                    // Pass Reducer logic (undefined if running standard parallel map)
                     reducerCode: reducerBody,
                     reduceArgs: reduceParams
                 });
             });
         })
     ).then(results => {
-        // Filter out nulls (empty chunks)
-        return results.filter(r => r !== null && r !== undefined);
+        return results.filter(r => r !== null && r !== undefined).flat();
     });
 }
 Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
@@ -10259,8 +10251,6 @@ Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
     const correctWorkerCount = Math.min(workerCount, list.length());
     const paramNames = ['item'];
 
-    
-
     return this.awaitPromise(() => {
         
         const blockToTranspile = mapper.expression || mapper;
@@ -10270,12 +10260,9 @@ Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
 
         const workers = createWorkers(correctWorkerCount);
 
-        // Pass NULL for the reducer args to indicate Map-Only mode
         return parallelMap(workers, jsArray, fullBody, paramNames, null, null)
             .then(resultArray => {
                 workers.forEach(w => w.terminate());
-                // Flatten the result because parallelMap returns an array of arrays in map-mode?
-                // Actually, our helper flattens it for us.
                 return new List(resultArray);
             });
     });
@@ -10314,14 +10301,11 @@ Process.prototype.reportMapReduce = function(mapper, reducer, list, numWorkers) 
         console.log('Map Body:', fullMapBody);
         console.log('Reduce Body:', fullReduceBody);
 
-        // B. Start Workers
         const workers = createWorkers(correctWorkerCount);
 
         return parallelMap(workers, jsArray, fullMapBody, mapParams, fullReduceBody, reduceParams)
             .then(partialResults => {
-                
-                // partialResults is now [18, 34] (The local sums)
-                
+                                
                 if (partialResults.length === 0) {
                     workers.forEach(w => w.terminate());
                     return 0;
@@ -10336,62 +10320,6 @@ Process.prototype.reportMapReduce = function(mapper, reducer, list, numWorkers) 
     });
 };
 
-
-
-    // this.assertType(list, 'list');
-    // if (list.length() === 0) return 0;
-
-    // // 1. Configuration
-    // const countInput = (typeof numWorkers === 'object' && numWorkers) ? numWorkers.evaluate() : numWorkers;
-    // const workerCount = Number(countInput) || navigator.hardwareConcurrency || 4;
-    // const correctWorkerCount = Math.min(workerCount, list.length());
-    
-    // // 2. Define Parameters
-    // // Map uses 'item', Reduce uses 'a' (accumulator) and 'b' (current value)
-    // const mapParams = ['item'];
-    // const reduceParams = ['a', 'b']; 
-
-    // // --- EXECUTION INSIDE PROMISE ---
-    // return this.awaitPromise(() => {
-        
-    //     // A. Transpile Mapper
-    //     const mapBlock = mapper.expression || mapper;
-    //     let mapCode;
-    //     try {
-    //         if (typeof mapBlock.transpileForWorker !== 'function') throw new Error("Transpiler missing");
-    //         mapCode = mapBlock.transpileForWorker(mapParams);
-    //     } catch (e) {
-    //         return Promise.reject('Map Transpilation Error: ' + e.message);
-    //     }
-
-    //     // B. Transpile Reducer
-    //     const reduceBlock = reducer.expression || reducer;
-    //     let reduceCode;
-    //     try {
-    //         reduceCode = reduceBlock.transpileForWorker(reduceParams);
-    //     } catch (e) {
-    //         return Promise.reject('Reduce Transpilation Error: ' + e.message);
-    //     }
-
-    //     // C. Prepare Function Bodies
-    //     const fullMapBody = `return ${mapCode};`;
-    //     const fullReduceBody = `return ${reduceCode};`;
-    //     const jsArray = list.itemsArray();
-
-    //     console.log('Map Body:', fullMapBody);
-    //     console.log('Reduce Body:', fullReduceBody);
-
-    //     // D. Start Workers
-    //     const workers = createWorkers(correctWorkerCount);
-
-    //     // E. Run Parallel Map
-    //     // IMPORTANT: Pass 'mapParams' here, NOT 'paramNames'
-    //     return parallelMap(workers, jsArray, fullMapBody, mapParams)
-    //         .then(resultArray => {
-    //             workers.forEach(w => w.terminate());
-    //             return new window.List(resultArray);
-    //         });
-    // });
 
 // Context /////////////////////////////////////////////////////////////
 

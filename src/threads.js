@@ -10320,6 +10320,46 @@ Process.prototype.reportMapReduce = function(mapper, reducer, list, numWorkers) 
     });
 };
 
+Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, script) {
+    const s = Number(start);
+    const e = Number(end);
+    const workerCount = Number(numWorkers) || navigator.hardwareConcurrency || 4;
+
+    const list = [];
+    if (s <= e) {
+        for (let i = s; i <= e; i++) list.push(i);
+    } else {
+        for (let i = s; i >= e; i--) list.push(i);
+    }
+
+    const correctWorkerCount = Math.min(workerCount, list.length);
+    const paramNames = [upvar];
+
+    return this.awaitPromise(() => {
+        if (!script) return Promise.resolve();
+
+        let jsCode;
+        try {
+            if (typeof script.transpileForWorker !== 'function') {
+                throw new Error("Transpiler missing");
+            }
+            jsCode = script.transpileForWorker(paramNames);
+        } catch (err) {
+            return Promise.reject(err.message);
+        }
+
+        const fullBody = `${jsCode}; return null;`;
+
+        const workers = createWorkers(correctWorkerCount);
+
+        return parallelMap(workers, list, fullBody, paramNames, null, null)
+            .then(() => {
+                workers.forEach(w => w.terminate());
+                return;
+            });
+    })
+};
+
 
 // Context /////////////////////////////////////////////////////////////
 

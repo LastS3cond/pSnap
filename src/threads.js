@@ -10129,6 +10129,20 @@ self.onmessage = function(e) {
                 self.postMessage({ type: 'result', result: mappedData });
             }
         }
+        else if (type === 'loop') {
+            // Parallel For Loop
+            // data contains { start, end, step } for this chunk
+            const loopBody = new Function(...msg.args, msg.code);
+            const start = data.start;
+            const end = data.end;
+            
+            // Execute the loop
+            for (let i = start; i <= end; i++) {
+                loopBody(i);
+            }
+            
+            self.postMessage({ type: 'done' });
+        }
     } catch (err) {
         self.postMessage({ error: err.toString() });
     }
@@ -10252,7 +10266,7 @@ Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
     const paramNames = ['item'];
 
     return this.awaitPromise(() => {
-        
+
         const blockToTranspile = mapper.expression || mapper;
         let jsCode = blockToTranspile.transpileForWorker(paramNames);
         const fullBody = `return ${jsCode};`;
@@ -10320,44 +10334,69 @@ Process.prototype.reportMapReduce = function(mapper, reducer, list, numWorkers) 
     });
 };
 
-Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, script) {
-    const s = Number(start);
-    const e = Number(end);
-    const workerCount = Number(numWorkers) || navigator.hardwareConcurrency || 4;
-
-    const list = [];
-    if (s <= e) {
-        for (let i = s; i <= e; i++) list.push(i);
-    } else {
-        for (let i = s; i >= e; i--) list.push(i);
+function chunkRange(start, end, nChunks) {
+    const total = end - start + 1;
+    const size = Math.ceil(total / nChunks);
+    const chunks = [];
+    for (let i = 0; i < nChunks; i++) {
+        const chunkStart = start + (i * size);
+        const chunkEnd = Math.min(end, chunkStart + size - 1);
+        if (chunkStart <= chunkEnd) {
+            chunks.push({ start: chunkStart, end: chunkEnd });
+        }
     }
+    return chunks;
+}
 
-    const correctWorkerCount = Math.min(workerCount, list.length);
-    const paramNames = [upvar];
+Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, script) {
+    const startVal = Number(start);
+    const endVal = Number(end);
+    const countInput = (typeof numWorkers === 'object' && numWorkers) ? numWorkers.evaluate() : numWorkers;
+    const workerCount = Number(countInput) || navigator.hardwareConcurrency || 4;
+    
+    // If range is invalid or empty
+    if (startVal > endVal) return;
 
     return this.awaitPromise(() => {
-        if (!script) return Promise.resolve();
-
-        let jsCode;
+        const paramNames = [upvar]; // The loop variable name
+        let jsCode = '';
+        
         try {
-            if (typeof script.transpileForWorker !== 'function') {
-                throw new Error("Transpiler missing");
+            // Transpile the script body
+            if (script && typeof script.expression.transpileForWorker === 'function') {
+                jsCode = script.expression.transpileForWorker(paramNames);
+                console.log(jsCode)
             }
-            jsCode = script.transpileForWorker(paramNames);
-        } catch (err) {
-            return Promise.reject(err.message);
+        } catch (e) {
+            console.log(e.message)
+            return Promise.reject(e.message);
         }
 
-        const fullBody = `${jsCode}; return null;`;
+        const chunks = chunkRange(startVal, endVal, workerCount);
+        const workers = createWorkers(chunks.length);
 
-        const workers = createWorkers(correctWorkerCount);
-
-        return parallelMap(workers, list, fullBody, paramNames, null, null)
-            .then(() => {
-                workers.forEach(w => w.terminate());
-                return;
-            });
-    })
+        return Promise.all(
+            workers.map((worker, i) => {
+                return new Promise((resolve, reject) => {
+                    worker.onmessage = msg => {
+                        if (msg.data.type === 'done') resolve();
+                        else if (msg.data.error) reject(new Error(msg.data.error));
+                    };
+                    worker.onerror = err => reject(err);
+                    
+                    worker.postMessage({
+                        type: 'loop',
+                        id: i + 1,
+                        data: chunks[i],
+                        code: jsCode,
+                        args: paramNames
+                    });
+                });
+            })
+        ).then(() => {
+            workers.forEach(w => w.terminate());
+        });
+    });
 };
 
 

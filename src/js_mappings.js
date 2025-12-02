@@ -1,4 +1,4 @@
-   (function () {
+(function () {
     if (typeof ReporterBlockMorph === 'undefined') return;
 
     const CODE_TEMPLATES = {
@@ -38,7 +38,42 @@
         slotIndex = 0; 
         return this.transpileReporter(paramNames);
     };
+    
+    // NEW: Command Block Entry Point
+    CommandBlockMorph.prototype.transpileForWorker = function (paramNames = []) {
+        slotIndex = 0;
+        let code = this.transpileCommand(paramNames);
+        if (this.nextBlock()) {
+            code += ';\n' + this.nextBlock().transpileForWorker(paramNames);
+        }
+        return code;
+    };
+
     BlockMorph.prototype.transpileForWorker = function () { return 'item'; };
+
+    // NEW: Command Transpiler Logic
+    CommandBlockMorph.prototype.transpileCommand = function(paramNames) {
+        const selector = this.selector;
+        const inputs = this.inputs();
+
+        switch (selector) {
+            case 'doSetVar':
+                // inputs[0] is the variable name (string), inputs[1] is value
+                return `${inputs[0].evaluate()} = ${this.transpileInput(inputs[1], paramNames)}`;
+            case 'doChangeVar':
+                return `${inputs[0].evaluate()} += Number(${this.transpileInput(inputs[1], paramNames)})`;
+            case 'doDeclareVariables':
+                // var names are in inputs[0] (MultiArgMorph)
+                const vars = inputs[0].inputs().map(slot => slot.evaluate()).join(', ');
+                return `let ${vars}`;
+            case 'log':
+                // inputs[0] is MultiArgMorph for %mult%s
+                const args = inputs[0].inputs().map(inp => this.transpileInput(inp, paramNames)).join(', ');
+                return `console.log(${args})`;
+            default:
+                return `// Unsupported command: ${selector}`;
+        }
+    };
 
     // C. Main Logic
     ReporterBlockMorph.prototype.transpileReporter = function (paramNames) {
@@ -54,6 +89,9 @@
         }
 
         switch (selector) {
+            case 'reportGetVar':
+                // Handle variable retrieval
+                return this.blockSpec;
             case 'reportVariadicSum': return this.transpileVariadic(inputs, paramNames, '+', '0', false, true);
             case 'reportVariadicProduct': return this.transpileVariadic(inputs, paramNames, '*', '1', false, true);
             case 'reportVariadicMax': return this.transpileMathFunction(inputs, paramNames, 'Math.max', '-Infinity');
@@ -99,6 +137,7 @@
     ReporterBlockMorph.prototype.transpileInput = function (input, paramNames) {
         if (!input) return 'undefined';
         if (input instanceof ReporterBlockMorph) return input.transpileReporter(paramNames);
+        if (input instanceof CommandBlockMorph) return input.transpileForWorker(paramNames); // Handle nested commands if any
         
         if (input instanceof InputSlotMorph) {
             // FIX: If slot is empty, pick the NEXT parameter, not always the first one
@@ -107,8 +146,12 @@
                 slotIndex++; 
                 return param;
             }
-            return input.evaluate().toString();
+            const val = input.evaluate();
+            // Quote strings that aren't numbers to ensure valid JS syntax
+            return isNaN(Number(val)) ? `"${val}"` : val;
         }
         return 'item';
     };
+
+    CommandBlockMorph.prototype.transpileInput = ReporterBlockMorph.prototype.transpileInput
 })();

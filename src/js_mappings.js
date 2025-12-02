@@ -137,7 +137,6 @@
     ReporterBlockMorph.prototype.transpileInput = function (input, paramNames) {
         if (!input) return 'undefined';
         if (input instanceof ReporterBlockMorph) return input.transpileReporter(paramNames);
-        if (input instanceof CommandBlockMorph) return input.transpileForWorker(paramNames); // Handle nested commands if any
         
         if (input instanceof InputSlotMorph) {
             // FIX: If slot is empty, pick the NEXT parameter, not always the first one
@@ -153,5 +152,21 @@
         return 'item';
     };
 
-    CommandBlockMorph.prototype.transpileInput = ReporterBlockMorph.prototype.transpileInput
+    CommandBlockMorph.prototype.transpileInput = function (input, paramNames) {
+        if (!input) return 'undefined';
+        if (input instanceof CommandBlockMorph) return input.transpileForWorker(paramNames); // Handle nested commands if any
+        
+        if (input instanceof InputSlotMorph) {
+            // FIX: If slot is empty, pick the NEXT parameter, not always the first one
+            if (input.contents().text === '') {
+                const param = paramNames[slotIndex % paramNames.length];
+                slotIndex++; 
+                return param;
+            }
+            const val = input.evaluate();
+            // Quote strings that aren't numbers to ensure valid JS syntax
+            return isNaN(Number(val)) ? `"${val}"` : val;
+        }
+        return 'item';
+    };
 })();

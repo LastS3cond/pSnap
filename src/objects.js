@@ -1173,6 +1173,13 @@ SpriteMorph.prototype.primitiveBlocks = function () {
         //         	spec: 'map %repRing reduce %repRing over %l %n' //%parallel'
         // //            spec: 'map %repRing reduce %repRing over %file'
         //         },
+        doParallelForEach: {
+            type: 'command',
+            category: 'parallel',
+            spec: 'parallel for each %upvar in %l with %n workers %cla',
+            defaults: ['item', null, 4],
+            code: 'parallelForEach'
+        },
         doWait: {
             type: 'command',
             category: 'control',
@@ -4141,8 +4148,9 @@ SpriteMorph.prototype.blockTemplates = function (
         blocks.push(block('reportReshape'));
         blocks.push(block('reportCrossproduct'));
         blocks.push(block('reportParallelMap'));
-        blocks.push(block('doParallelFor'));
         blocks.push(block('reportMapReduce'));
+        blocks.push(block('doParallelFor'));
+        blocks.push(block('doParallelForEach'));
 
         if (SpriteMorph.prototype.showingExtensions) {
             blocks.push('=');

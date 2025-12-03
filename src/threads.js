@@ -10143,6 +10143,18 @@ self.onmessage = function(e) {
             
             self.postMessage({ type: 'done' });
         }
+        else if (type === "foreach") {
+            const loopBody = new Function(...msg.args, msg.code);
+    
+            try {
+                for (let i = 0; i < data.length; i++) {
+                    loopBody(data[i]);
+                }
+                self.postMessage({ type: "done" });
+            } catch (error) {
+                self.postMessage({ error: error.toString()});
+            }
+        }
     } catch (err) {
         self.postMessage({ error: err.toString() });
     }
@@ -10386,6 +10398,57 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, scrip
                     
                     worker.postMessage({
                         type: 'loop',
+                        id: i + 1,
+                        data: chunks[i],
+                        code: jsCode,
+                        args: paramNames
+                    });
+                });
+            })
+        ).then(() => {
+            workers.forEach(w => w.terminate());
+        });
+    });
+};
+
+Process.prototype.doParallelForEach = function (upvar, list, numWorkers, script) {
+    this.assertType(list, 'list');
+    if (list.length() === 0) return;
+
+    const countInput = (typeof numWorkers === 'object' && numWorkers) ? numWorkers.evaluate() : numWorkers;
+    const workerCount = Number(countInput) || navigator.hardwareConcurrency || 4;
+    const correctWorkerCount = Math.min(workerCount, list.length());
+
+    return this.awaitPromise(() => {
+        const paramNames = [upvar]; // The loop variable name
+        let jsCode = '';
+        
+        try {
+            // Transpile the script body
+            if (script && typeof script.expression.transpileForWorker === 'function') {
+                jsCode = script.expression.transpileForWorker(paramNames);
+                console.log(jsCode)
+            }
+        } catch (e) {
+            console.log(e.message)
+            return Promise.reject(e.message);
+        }
+
+        const jsArray = list.itemsArray();
+        const chunks = chunk(jsArray, correctWorkerCount);
+        const workers = createWorkers(chunks.length);
+
+        return Promise.all(
+            workers.map((worker, i) => {
+                return new Promise((resolve, reject) => {
+                    worker.onmessage = msg => {
+                        if (msg.data.type === 'done') resolve();
+                        else if (msg.data.error) reject(new Error(msg.data.error));
+                    };
+                    worker.onerror = err => reject(err);
+                    
+                    worker.postMessage({
+                        type: 'foreach',
                         id: i + 1,
                         data: chunks[i],
                         code: jsCode,

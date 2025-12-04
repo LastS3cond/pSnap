@@ -1162,7 +1162,7 @@ SpriteMorph.prototype.primitiveBlocks = function () {
         doParallelFor: {
             type: 'command',
             category: 'variables',
-            spec: 'parallel for %upvar = %n to %n with %n workers %cla',
+            spec: 'parallel for %upvar = %n to %n with %n workers, %mult%var firstPrivate, and %repRing reduction %cla',
             defaults: ['i', 1, 10, 4],
             code: 'parallelFor'
         },

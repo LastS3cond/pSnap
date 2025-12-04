@@ -10132,16 +10132,35 @@ self.onmessage = function(e) {
         else if (type === 'loop') {
             // Parallel For Loop
             // data contains { start, end, step } for this chunk
-            const loopBody = new Function(...msg.args, msg.code);
+            
+            // Handle firstPrivate variables
+            let varDecls = '';
+            let returnObj = '{';
+            if (msg.firstPrivate) {
+                msg.firstPrivate.forEach(obj => {
+                    const name = Object.keys(obj)[0];
+                    const val = obj[name];
+                    varDecls += 'let ' + name + ' = ' + JSON.stringify(val) + ';\\n';
+                    returnObj += name + ': ' + name + ',';
+                });
+            }
+            returnObj += '}';
+
             const start = data.start;
             const end = data.end;
+            const loopVar = msg.args[0];
+
+            const workerCode = 
+                varDecls +
+                'for (let ' + loopVar + ' = ' + start + '; ' + loopVar + ' <= ' + end + '; ' + loopVar + '++) {' +
+                    msg.code +
+                '}' +
+                'return ' + returnObj + ';';
             
-            // Execute the loop
-            for (let i = start; i <= end; i++) {
-                loopBody(i);
-            }
+            const workerFunc = new Function(workerCode);
+            const resultVars = workerFunc();
             
-            self.postMessage({ type: 'done' });
+            self.postMessage({ type: 'done', results: resultVars });
         }
         else if (type === "foreach") {
             const loopBody = new Function(...msg.args, msg.code);
@@ -10360,7 +10379,7 @@ function chunkRange(start, end, nChunks) {
     return chunks;
 }
 
-Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, script) {
+Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, firstPrivate, reduction, script) {
     const startVal = Number(start);
     const endVal = Number(end);
     const countInput = (typeof numWorkers === 'object' && numWorkers) ? numWorkers.evaluate() : numWorkers;
@@ -10370,14 +10389,26 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, scrip
     if (startVal > endVal) return;
 
     return this.awaitPromise(() => {
+        let privateVars = [];
+        if (firstPrivate instanceof List) {
+             privateVars = firstPrivate.itemsArray().map(varName => {
+                return {[varName]: this.context.variables.getVar(varName)};
+            });
+        }
+
         const paramNames = [upvar]; // The loop variable name
         let jsCode = '';
+        let reductionCode = '';
         
         try {
             // Transpile the script body
             if (script && typeof script.expression.transpileForWorker === 'function') {
                 jsCode = script.expression.transpileForWorker(paramNames);
-                console.log(jsCode)
+            }
+            
+            // Transpile reduction if present
+            if (reduction && typeof reduction.expression.transpileForWorker === 'function') {
+                reductionCode = reduction.expression.transpileForWorker(['a', 'b']);
             }
         } catch (e) {
             console.log(e.message)
@@ -10391,7 +10422,7 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, scrip
             workers.map((worker, i) => {
                 return new Promise((resolve, reject) => {
                     worker.onmessage = msg => {
-                        if (msg.data.type === 'done') resolve();
+                        if (msg.data.type === 'done') resolve(msg.data.results);
                         else if (msg.data.error) reject(new Error(msg.data.error));
                     };
                     worker.onerror = err => reject(err);
@@ -10401,12 +10432,27 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, scrip
                         id: i + 1,
                         data: chunks[i],
                         code: jsCode,
-                        args: paramNames
+                        args: paramNames,
+                        firstPrivate: privateVars
                     });
                 });
             })
-        ).then(() => {
+        ).then((results) => {
             workers.forEach(w => w.terminate());
+            
+            if (privateVars.length > 0 && reductionCode) {
+                const reducer = new Function('a', 'b', `return ${reductionCode};`);
+                
+                privateVars.forEach(item => {
+                    const varName = Object.keys(item)[0];
+                    const values = results.map(r => r[varName]);
+                    
+                    if (values.length > 0) {
+                        const finalValue = values.reduce((acc, val) => reducer(acc, val));
+                        this.context.variables.setVar(varName, finalValue);
+                    }
+                });
+            }
         });
     });
 };

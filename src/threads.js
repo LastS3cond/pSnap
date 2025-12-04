@@ -10379,7 +10379,7 @@ function chunkRange(start, end, nChunks) {
     return chunks;
 }
 
-Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, firstPrivate, reduction, script) {
+Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, firstPrivate, reductionVars, reductions, script) {
     const startVal = Number(start);
     const endVal = Number(end);
     const countInput = (typeof numWorkers === 'object' && numWorkers) ? numWorkers.evaluate() : numWorkers;
@@ -10398,17 +10398,23 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, first
 
         const paramNames = [upvar]; // The loop variable name
         let jsCode = '';
-        let reductionCode = '';
+        let reductionCodes = [];
         
         try {
             // Transpile the script body
             if (script && typeof script.expression.transpileForWorker === 'function') {
                 jsCode = script.expression.transpileForWorker(paramNames);
+                // console.log(jsCode)
             }
             
-            // Transpile reduction if present
-            if (reduction && typeof reduction.expression.transpileForWorker === 'function') {
-                reductionCode = reduction.expression.transpileForWorker(['a', 'b']);
+            // Transpile reductions
+            if (reductions instanceof List) {
+                reductionCodes = reductions.itemsArray().map(ring => {
+                    if (ring && ring.expression && typeof ring.expression.transpileForWorker === 'function') {
+                        return ring.expression.transpileForWorker(['a', 'b']);
+                    }
+                    return null;
+                });
             }
         } catch (e) {
             console.log(e.message)
@@ -10440,23 +10446,32 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, first
         ).then((results) => {
             workers.forEach(w => w.terminate());
             
-            if (privateVars.length > 0 && reductionCode) {
-                const reducer = new Function('a', 'b', `return ${reductionCode};`);
+            if (reductionVars instanceof List) {
+                const varsToReduce = reductionVars.itemsArray();
                 
-                privateVars.forEach(item => {
-                    const varName = Object.keys(item)[0];
-                    const values = results.map(r => r[varName]);
-                    
-                    if (values.length > 0) {
-                        const finalValue = values.reduce((acc, val) => reducer(acc, val));
-                        this.context.variables.setVar(varName, finalValue);
+                varsToReduce.forEach((varName, index) => {
+                    // Get corresponding reduction code
+                    // If we have fewer reductions than vars, use the last one available
+                    let code = reductionCodes[index];
+                    if (!code && reductionCodes.length > 0) {
+                         code = reductionCodes[Math.min(index, reductionCodes.length - 1)];
+                    }
+
+                    if (code) {
+                        const reducer = new Function('a', 'b', `return ${code};`);
+                        const values = results.map(r => r[varName]);
+                        const validValues = values.filter(v => v !== undefined);
+
+                        if (validValues.length > 0) {
+                            const finalValue = validValues.reduce((acc, val) => reducer(acc, val));
+                            this.context.variables.setVar(varName, finalValue);
+                        }
                     }
                 });
             }
         });
     });
 };
-
 Process.prototype.doParallelForEach = function (upvar, list, numWorkers, script) {
     this.assertType(list, 'list');
     if (list.length() === 0) return;

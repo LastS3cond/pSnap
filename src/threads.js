@@ -10095,7 +10095,34 @@ self.onmessage = function(e) {
 
     try {
         if (type === 'map') {
-            // ...existing code...
+            self.postMessage({ 
+                type: 'log', 
+                message: 'Worker ' + workerId + ' started. Items: ' + data.length
+            });
+
+            const mapper = new Function(...msg.args, msg.mapperCode);
+            const mappedData = data.map(item => mapper(item));
+
+            if (msg.reducerCode) {
+                // If the chunk resulted in no data, return null
+                if (mappedData.length === 0) {
+                    self.postMessage({ type: 'result', result: null, empty: true });
+                    return;
+                }
+
+                const reducer = new Function(...msg.reduceArgs, msg.reducerCode);
+                const reducedValue = mappedData.reduce((acc, val) => reducer(acc, val));
+
+                self.postMessage({ 
+                    type: 'log', 
+                    message: 'Worker ' + workerId + ' finished local reduce: ' + reducedValue 
+                });
+
+                self.postMessage({ type: 'result', result: reducedValue });
+            } 
+            else {
+                self.postMessage({ type: 'result', result: mappedData });
+            }
         }
         else if (type === 'loop') {
             // Parallel For Loop
@@ -10307,6 +10334,8 @@ function parallelMap(workers, jsArray, mapperBody, mapParams, reducerBody, reduc
 Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
     this.assertType(list, 'list');
     if (list.length() === 0) return new List();
+    const timerLabel = "ParallelMap Job " + Date.now();
+    console.time(timerLabel);
 
     const countInput = (typeof numWorkers === 'object' && numWorkers) ? numWorkers.evaluate() : numWorkers;
     const workerCount = Number(countInput) || navigator.hardwareConcurrency || 4;
@@ -10325,6 +10354,7 @@ Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
         return parallelMap(workers, jsArray, fullBody, paramNames, null, null)
             .then(resultArray => {
                 workers.forEach(w => w.terminate());
+                console.timeEnd(timerLabel);
                 return new List(resultArray);
             });
     });

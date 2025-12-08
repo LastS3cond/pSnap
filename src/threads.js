@@ -10014,7 +10014,40 @@ Process.prototype.reportDigitalReading = function (pin, booleanValue) {
         new List([pin])
     );
 };
+Process.prototype.reportLoadWasm = function (scriptUrl) {
+    return this.awaitPromise(function () {
+        return new Promise(function (resolve, reject) {
+            
+            //  Check if already loadeds
+            if (window.processorInstance && window.Module) {
+                resolve("Wasm Environment already active");
+                return;
+            }
 
+            // Setup Emscripten Hooks
+            window.Module = {
+                onRuntimeInitialized: function() {
+                    // We save the instance for our other blocks.
+                    window.processorInstance = window.Module; 
+                    console.log("OpenMP Wasm Environment Ready");
+                    resolve("Wasm Loaded with Threads");
+                },
+                print: function(text) { console.log("[Wasm]", text); },
+                printErr: function(text) { console.error("[Wasm Error]", text); }
+            };
+
+            // We load processor.js and processor.wasm
+            var script = document.createElement('script');
+            script.src = scriptUrl; // e.g., "http://localhost:8000/processor.js"
+            
+            script.onerror = function() {
+                reject("Failed to load script: " + scriptUrl);
+            };
+
+            document.body.appendChild(script);
+        });
+    });
+};
 Process.prototype.reportParallelAdd = function(list, num) {
 	// Create an array of arrays, chunking by the supplied num.
 	// One worker per chunk is spawned to calculate the scalar

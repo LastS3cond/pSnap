@@ -1168,7 +1168,7 @@ SpriteMorph.prototype.primitiveBlocks = function () {
         doParallelFor: {
             type: 'command',
             category: 'variables',
-            spec: 'parallel for %upvar = %n to %n with %n workers %cla',
+            spec: 'parallel for %upvar = %n to %n with %n workers; firstPrivate %mult%var ; private %mult%var ; lastPrivate %mult%var ; reduce %mult%var using %mult%repRing %cla',
             defaults: ['i', 1, 10, 4],
             code: 'parallelFor'
         },
@@ -1179,6 +1179,13 @@ SpriteMorph.prototype.primitiveBlocks = function () {
         //         	spec: 'map %repRing reduce %repRing over %l %n' //%parallel'
         // //            spec: 'map %repRing reduce %repRing over %file'
         //         },
+        doParallelForEach: {
+            type: 'command',
+            category: 'variables',
+            spec: 'parallel for each %upvar in %l with %n workers %cla',
+            defaults: ['item', null, 4],
+            code: 'parallelForEach'
+        },
         doWait: {
             type: 'command',
             category: 'control',
@@ -4147,8 +4154,9 @@ SpriteMorph.prototype.blockTemplates = function (
         blocks.push(block('reportReshape'));
         blocks.push(block('reportCrossproduct'));
         blocks.push(block('reportParallelMap'));
-        blocks.push(block('doParallelFor'));
         blocks.push(block('reportMapReduce'));
+        blocks.push(block('doParallelFor'));
+        blocks.push(block('doParallelForEach'));
         blocks.push(block('reportLoadWasm'))
         if (SpriteMorph.prototype.showingExtensions) {
             blocks.push('=');

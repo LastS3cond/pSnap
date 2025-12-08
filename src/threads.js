@@ -10128,53 +10128,101 @@ self.onmessage = function(e) {
 
     try {
         if (type === 'map') {
-            // 1. Log Start
-            self.postMessage({ 
-                type: 'log', 
-                message: 'Worker ' + workerId + ' started. Items: ' + data.length
-            });
-
-            // 2. Map Phase
-            const mapper = new Function(...msg.args, msg.mapperCode);
-            const mappedData = data.map(item => mapper(item));
-
-            // 3. Reduce Phase (Local Optimization)
-            if (msg.reducerCode) {
-                // If the chunk resulted in no data, return null
-                if (mappedData.length === 0) {
-                    self.postMessage({ type: 'result', result: null, empty: true });
-                    return;
-                }
-
-                const reducer = new Function(...msg.reduceArgs, msg.reducerCode);
-                const reducedValue = mappedData.reduce((acc, val) => reducer(acc, val));
-
-                self.postMessage({ 
-                    type: 'log', 
-                    message: 'Worker ' + workerId + ' finished local reduce: ' + reducedValue 
-                });
-
-                // Send back the SINGLE number (e.g., 18)
-                self.postMessage({ type: 'result', result: reducedValue });
-            } 
-            else {
-                // No reducer provided? Send back the WHOLE list (Standard Parallel Map)
-                self.postMessage({ type: 'result', result: mappedData });
-            }
+            // ...existing code...
         }
         else if (type === 'loop') {
             // Parallel For Loop
             // data contains { start, end, step } for this chunk
-            const loopBody = new Function(...msg.args, msg.code);
+            
+            let varDecls = '';
+            let returnObj = '{';
+            const declared = new Set();
+
+            // 1. FirstPrivate (Declared & Initialized)
+            if (msg.firstPrivate) {
+                msg.firstPrivate.forEach(obj => {
+                    const name = Object.keys(obj)[0];
+                    const val = obj[name];
+                    varDecls += 'let ' + name + ' = ' + JSON.stringify(val) + ';\\n';
+                    returnObj += name + ': ' + name + ',';
+                    declared.add(name);
+                });
+            }
+
+            // 2. Private (Declared & Initialized)
+            if (msg.private) {
+                msg.private.forEach(name => {
+                    if (!declared.has(name)) {
+                        let init = '0';
+                        if (msg.initializations && msg.initializations[name]) {
+                            init = msg.initializations[name];
+                        }
+                        varDecls += 'let ' + name + ' = ' + init + ';\\n';
+                        declared.add(name);
+                    }
+                });
+            }
+
+            // 3. LastPrivate (Declared if needed, Returned)
+            if (msg.lastPrivate) {
+                msg.lastPrivate.forEach(name => {
+                    if (!declared.has(name)) {
+                        let init = '0';
+                        if (msg.initializations && msg.initializations[name]) {
+                            init = msg.initializations[name];
+                        }
+                        varDecls += 'let ' + name + ' = ' + init + ';\\n';
+                        declared.add(name);
+                    }
+                    // Ensure it is added to the return object
+                    if (!returnObj.includes(name + ':')) {
+                         returnObj += name + ': ' + name + ',';
+                    }
+                });
+            }
+
+            // 4. Reduction Vars (Ensure returned)
+            if (msg.reductionVars) {
+                 msg.reductionVars.forEach(name => {
+                    if (!declared.has(name)) {
+                        varDecls += 'let ' + name + ' = 0;\\n';
+                        declared.add(name);
+                    }
+                    if (!returnObj.includes(name + ':')) {
+                         returnObj += name + ': ' + name + ',';
+                    }
+                 });
+            }
+
+            returnObj += '}';
+
             const start = data.start;
             const end = data.end;
+            const loopVar = msg.args[0];
+
+            const workerCode = 
+                varDecls +
+                'for (let ' + loopVar + ' = ' + start + '; ' + loopVar + ' <= ' + end + '; ' + loopVar + '++) {' +
+                    msg.code +
+                '}' +
+                'return ' + returnObj + ';';
             
-            // Execute the loop
-            for (let i = start; i <= end; i++) {
-                loopBody(i);
+            const workerFunc = new Function(workerCode);
+            const resultVars = workerFunc();
+            
+            self.postMessage({ type: 'done', results: resultVars });
+        }
+        else if (type === "foreach") {
+            const loopBody = new Function(...msg.args, msg.code);
+    
+            try {
+                for (let i = 0; i < data.length; i++) {
+                    loopBody(data[i]);
+                }
+                self.postMessage({ type: "done" });
+            } catch (error) {
+                self.postMessage({ error: error.toString()});
             }
-            
-            self.postMessage({ type: 'done' });
         }
     } catch (err) {
         self.postMessage({ error: err.toString() });
@@ -10381,7 +10429,7 @@ function chunkRange(start, end, nChunks) {
     return chunks;
 }
 
-Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, script) {
+Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, firstPrivate, privateVars, lastPrivateVars, reductionVars, reductions, script) {
     const startVal = Number(start);
     const endVal = Number(end);
     const countInput = (typeof numWorkers === 'object' && numWorkers) ? numWorkers.evaluate() : numWorkers;
@@ -10389,6 +10437,175 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, scrip
     
     // If range is invalid or empty
     if (startVal > endVal) return;
+
+    return this.awaitPromise(() => {
+        // Helper to filter valid variable names
+        const filterVarNames = (list) => {
+            if (list instanceof List) {
+                return list.itemsArray().filter(name => name && typeof name === 'string' && name.trim().length > 0);
+            }
+            return [];
+        };
+
+        let firstPrivateList = [];
+        if (firstPrivate instanceof List) {
+             firstPrivateList = filterVarNames(firstPrivate).map(varName => {
+                return {[varName]: this.context.variables.getVar(varName)};
+            });
+        }
+        
+        let privateList = filterVarNames(privateVars);
+        let lastPrivateList = filterVarNames(lastPrivateVars);
+        let reductionList = filterVarNames(reductionVars);
+
+        // Check for duplicate variable usage across different lists
+        const firstPrivateNames = firstPrivateList.map(obj => Object.keys(obj)[0]);
+        const usageMap = new Map();
+        
+        const checkDuplicates = (names, listName) => {
+            for (const name of names) {
+                if (usageMap.has(name)) {
+                    throw new Error(`Variable '${name}' cannot be used in both '${usageMap.get(name)}' and '${listName}'`);
+                }
+                usageMap.set(name, listName);
+            }
+        };
+
+        try {
+            checkDuplicates(firstPrivateNames, 'firstPrivate');
+            checkDuplicates(privateList, 'private');
+            checkDuplicates(lastPrivateList, 'lastPrivate');
+            checkDuplicates(reductionList, 'reduction');
+        } catch (e) {
+            return Promise.reject(e);
+        }
+
+        const paramNames = [upvar]; // The loop variable name
+        let jsCode = '';
+        let reductionCodes = [];
+        let initializations = {};
+        
+        try {
+            // Transpile the script body
+            if (script && script.expression && typeof script.expression.transpileForWorker === 'function') {
+                jsCode = script.expression.transpileForWorker(paramNames);
+                
+                // Optimization: Lift initializations of private/lastPrivate vars out of the loop
+                const privateVarsSet = new Set([...privateList, ...lastPrivateList]);
+                
+                while (true) {
+                    // Match "varName = ...;" at the start of the code
+                    const match = jsCode.match(/^\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(.+?);\s*/);
+                    
+                    if (match) {
+                        const varName = match[1];
+                        const initExpr = match[2];
+                        const fullMatch = match[0];
+                        
+                        if (privateVarsSet.has(varName)) {
+                            // Check if initExpr uses the loop variable
+                            const upvarRegex = new RegExp(`\\b${upvar}\\b`);
+                            if (upvarRegex.test(initExpr)) {
+                                break; // Cannot lift initialization that depends on loop variable
+                            }
+
+                            // Remove from jsCode
+                            jsCode = jsCode.substring(fullMatch.length);
+                            initializations[varName] = initExpr;
+                        } else {
+                            break; // Not a private var assignment, stop looking
+                        }
+                    } else {
+                        break; // No assignment found
+                    }
+                }
+            }
+            
+            // Transpile reductions
+            if (reductions instanceof List) {
+                reductionCodes = reductions.itemsArray().map(ring => {
+                    if (ring && ring.expression && typeof ring.expression.transpileForWorker === 'function') {
+                        return ring.expression.transpileForWorker(['a', 'b']);
+                    }
+                    return null;
+                });
+            }
+        } catch (e) {
+            console.log(e.message)
+            return Promise.reject(e.message);
+        }
+
+        const chunks = chunkRange(startVal, endVal, workerCount);
+        const workers = createWorkers(chunks.length);
+
+        return Promise.all(
+            workers.map((worker, i) => {
+                return new Promise((resolve, reject) => {
+                    worker.onmessage = msg => {
+                        if (msg.data.type === 'done') resolve(msg.data.results);
+                        else if (msg.data.error) reject(new Error(msg.data.error));
+                    };
+                    worker.onerror = err => reject(err);
+                    
+                    worker.postMessage({
+                        type: 'loop',
+                        id: i + 1,
+                        data: chunks[i],
+                        code: jsCode,
+                        args: paramNames,
+                        firstPrivate: firstPrivateList,
+                        private: privateList,
+                        lastPrivate: lastPrivateList,
+                        reductionVars: reductionList,
+                        initializations: initializations
+                    });
+                });
+            })
+        ).then((results) => {
+            workers.forEach(w => w.terminate());
+            
+            // Handle LastPrivate
+            if (lastPrivateList.length > 0) {
+                const lastResult = results[results.length - 1];
+                lastPrivateList.forEach(name => {
+                    if (lastResult && lastResult[name] !== undefined) {
+                        this.context.variables.setVar(name, lastResult[name]);
+                    }
+                });
+            }
+
+            // Handle Reduction
+            if (reductionList.length > 0) {
+                reductionList.forEach((varName, index) => {
+                    // Get corresponding reduction code
+                    let code = reductionCodes[index];
+                    if (!code && reductionCodes.length > 0) {
+                         code = reductionCodes[Math.min(index, reductionCodes.length - 1)];
+                    }
+
+                    if (code) {
+                        const reducer = new Function('a', 'b', `return ${code};`);
+                        const values = results.map(r => r[varName]);
+                        const validValues = values.filter(v => v !== undefined);
+
+                        if (validValues.length > 0) {
+                            const finalValue = validValues.reduce((acc, val) => reducer(acc, val));
+                            this.context.variables.setVar(varName, finalValue);
+                        }
+                    }
+                });
+            }
+        });
+    });
+};
+
+Process.prototype.doParallelForEach = function (upvar, list, numWorkers, script) {
+    this.assertType(list, 'list');
+    if (list.length() === 0) return;
+
+    const countInput = (typeof numWorkers === 'object' && numWorkers) ? numWorkers.evaluate() : numWorkers;
+    const workerCount = Number(countInput) || navigator.hardwareConcurrency || 4;
+    const correctWorkerCount = Math.min(workerCount, list.length());
 
     return this.awaitPromise(() => {
         const paramNames = [upvar]; // The loop variable name
@@ -10405,7 +10622,8 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, scrip
             return Promise.reject(e.message);
         }
 
-        const chunks = chunkRange(startVal, endVal, workerCount);
+        const jsArray = list.itemsArray();
+        const chunks = chunk(jsArray, correctWorkerCount);
         const workers = createWorkers(chunks.length);
 
         return Promise.all(
@@ -10418,7 +10636,7 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, scrip
                     worker.onerror = err => reject(err);
                     
                     worker.postMessage({
-                        type: 'loop',
+                        type: 'foreach',
                         id: i + 1,
                         data: chunks[i],
                         code: jsCode,

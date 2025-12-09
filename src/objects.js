@@ -1153,6 +1153,12 @@ SpriteMorph.prototype.primitiveBlocks = function () {
             spec: 'parallel map %repRing over %l with %n workers',//%parallel'
             defaults: [null, null, 4]
         },
+        reportLoadWasm: {
+            type: 'reporter',
+            category: 'variables',
+            spec: 'load wasm file from %s',
+            defaults: [null]
+        },
         reportMapReduce: {
             type: 'reporter',
             category: 'variables',
@@ -4151,7 +4157,7 @@ SpriteMorph.prototype.blockTemplates = function (
         blocks.push(block('reportMapReduce'));
         blocks.push(block('doParallelFor'));
         blocks.push(block('doParallelForEach'));
-
+        blocks.push(block('reportLoadWasm'))
         if (SpriteMorph.prototype.showingExtensions) {
             blocks.push('=');
             blocks.push(block('doPrimitive'));

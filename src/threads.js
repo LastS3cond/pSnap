@@ -10394,8 +10394,58 @@ Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
 };
 
 Process.prototype.reportWebAssemblyParallelMap = function (mapper, list, numWorkers) {
-    
-} 
+    var mod = window.Module;
+
+    if (!mod || !mod._malloc) {
+        throw new Error("WebAssembly Module is not loaded.");
+    }
+
+    var jsArray = list.asArray(); 
+    var length = jsArray.length;
+    var opCode = 0; 
+    var parameter = 0;
+
+    var expression = mapper.expression; 
+    var selector = expression.selector;
+
+    var inputs = expression.inputs();
+    for (var i = 0; i < inputs.length; i++) {
+        var val = parseFloat(inputs[i]); 
+        if (!isNaN(val)) {
+            parameter = val;
+            break;
+        }
+    }
+
+    if (selector === 'reportSum') {
+        opCode = 1; 
+    } 
+    else if (selector === 'reportProduct') {
+        opCode = 2; 
+    } 
+    else {
+        throw new Error("Unsupported block. Please use (+) or (*).");
+    }
+
+    var bytesPerElement = 8; 
+    var dataPtr = mod._malloc(length * bytesPerElement);
+    var heapOffset = dataPtr / bytesPerElement;
+
+    mod.HEAPF64.set(jsArray, heapOffset);
+
+    var resultStatus = mod._wasm_process_array(opCode, dataPtr, length, parameter);
+
+    if (isNaN(resultStatus)) {
+        mod._free(dataPtr);
+        throw new Error("C code returned error (NAN).");
+    }
+
+    var resultSubarray = mod.HEAPF64.subarray(heapOffset, heapOffset + length);
+    var resultList = Array.from(resultSubarray);
+
+    mod._free(dataPtr);
+    return new List(resultList);
+};
 
 
 Process.prototype.reportMapReduce = function(mapper, reducer, list, numWorkers) {

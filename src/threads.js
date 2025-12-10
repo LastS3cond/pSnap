@@ -10014,39 +10014,49 @@ Process.prototype.reportDigitalReading = function (pin, booleanValue) {
         new List([pin])
     );
 };
-Process.prototype.reportLoadWasm = function (scriptUrl) {
-    return this.awaitPromise(function () {
-        return new Promise(function (resolve, reject) {
-            
-            //  Check if already loadeds
-            if (window.processorInstance && window.Module) {
-                resolve("Wasm Environment already active");
-                return;
-            }
+Process.prototype.reportLoadWasm = function () {
 
-            // Setup Emscripten Hooks
-            window.Module = {
-                onRuntimeInitialized: function() {
-                    // We save the instance for our other blocks.
-                    window.processorInstance = window.Module; 
-                    console.log("OpenMP Wasm Environment Ready");
-                    resolve("Wasm Loaded with Threads");
-                },
-                print: function(text) { console.log("[Wasm]", text); },
-                printErr: function(text) { console.error("[Wasm Error]", text); }
-            };
+    var iframe = document.getElementById('wasm-runner');
 
-            // We load processor.js and processor.wasm
-            var script = document.createElement('script');
-            script.src = scriptUrl; // e.g., "http://localhost:8000/processor.js"
-            
-            script.onerror = function() {
-                reject("Failed to load script: " + scriptUrl);
-            };
+    if (!iframe) {
+        iframe = document.createElement('iframe');
+        iframe.id = 'wasm-runner';
+        iframe.style.display = 'none'; 
+        iframe.src = '../wasm_experiments_temp/array_processor.html'; 
+        document.body.appendChild(iframe);
+        
+        iframe.onload = function() {
+            alert("WASM Module Loaded and Ready!");
+        };
+        return "Initializing WASM...";
+    }
 
-            document.body.appendChild(script);
-        });
-    });
+
+    var wasmWindow = iframe.contentWindow;
+    if (!wasmWindow.Module || !wasmWindow.Module._malloc) {
+        return "Waiting for WASM to initialize...";
+    }
+
+
+    (async function() {
+        var Module = wasmWindow.Module;
+        var length = 8;
+        var bytes = length * 8;
+        
+        console.log("Allocating...");
+        var ptr = await Module._malloc(bytes);
+        
+        console.log("Processing in Threads...");
+        await Module._wasm_process_array(1, ptr, length, 100.5);
+        
+        console.log("Printing Result from C:");
+        await Module._print_array(ptr, length);
+        
+        await Module._free(ptr);
+        alert("Check Console (F12) for Parallel Results!");
+    })();
+
+    return "Processing started...";
 };
 
 const workerSource = `

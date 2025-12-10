@@ -10477,9 +10477,14 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, first
         const firstPrivateNames = firstPrivateList.map(obj => Object.keys(obj)[0]);
         const usageMap = new Map();
         
+        const allowedDuplicates = new Set([
+            'firstPrivate:lastPrivate',
+            'lastPrivate:firstPrivate'
+        ]);
+
         const checkDuplicates = (names, listName) => {
             for (const name of names) {
-                if (usageMap.has(name)) {
+                if (usageMap.has(name) && !allowedDuplicates.has(`${listName}:${usageMap.get(name)}`)) {
                     throw new Error(`Variable '${name}' cannot be used in both '${usageMap.get(name)}' and '${listName}'`);
                 }
                 usageMap.set(name, listName);

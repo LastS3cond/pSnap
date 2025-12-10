@@ -1189,7 +1189,7 @@ SpriteMorph.prototype.primitiveBlocks = function () {
         doParallelForEach: {
             type: 'command',
             category: 'parallel',
-            spec: 'parallel for each %upvar in %l with %n workers %cla',
+            spec: 'parallel for each %upvar in %l with %n workers; firstPrivate %mult%var ; private %mult%var ; lastPrivate %mult%var ; reduce %mult%var using %mult%repRing %cla',
             defaults: ['item', null, 4],
             code: 'parallelForEach'
         },

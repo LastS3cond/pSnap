@@ -10201,10 +10201,13 @@ function createWorkers(n) {
 }
 
 function chunk(array, nChunks) {
-    const size = Math.ceil(array.length / nChunks);
     const chunks = [];
-    for (let i = 0; i < array.length; i += size) {
-        chunks.push(array.slice(i, i + size));
+    let start = 0;
+  
+    for (let i = 0; i < nChunks; i++) {
+        const size = Math.ceil((array.length - start) / (nChunks - i));
+        chunks.push(array.slice(start, start + size));
+        start += size;
     }
     return chunks;
 }
@@ -10431,15 +10434,12 @@ Process.prototype.reportMapReduce = function(mapper, reducer, list, numWorkers) 
 };
 
 function chunkRange(start, end, nChunks) {
-    const total = end - start + 1;
-    const size = Math.ceil(total / nChunks);
     const chunks = [];
+  
     for (let i = 0; i < nChunks; i++) {
-        const chunkStart = start + (i * size);
-        const chunkEnd = Math.min(end, chunkStart + size - 1);
-        if (chunkStart <= chunkEnd) {
-            chunks.push({ start: chunkStart, end: chunkEnd });
-        }
+        const size = Math.ceil((end - start + 1) / (nChunks - i));
+        chunks.push({ start: start, end: start + size - 1});
+        start += size;
     }
     return chunks;
 }

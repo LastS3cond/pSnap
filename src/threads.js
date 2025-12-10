@@ -10048,76 +10048,6 @@ Process.prototype.reportLoadWasm = function (scriptUrl) {
         });
     });
 };
-Process.prototype.reportParallelAdd = function(list, num) {
-	// Create an array of arrays, chunking by the supplied num.
-	// One worker per chunk is spawned to calculate the scalar
-	// sum of its values, and these sums are added together
-	// to get the final sum which is returned.
-
-	// At each runStep check to see if the workers are done.
-	// If so, return the resulting array and quit.
-
-	// Use the context input array to store the parallel job:
-	// [0] - list 
-	// [1] - num
-	// ------------------------------
-	// [2] - Parallel object
-	
-	let i, sum,
-		start, end,
-		chunk, rem,
-		new_list = [];
-	
-    let myWorker;
-
-	if (this.context.inputs.length < 3) {
-		chunk = Math.floor(list.length()/num);
-		rem = list.length() - chunk*num;
-		start = 0;
-		end = 0;
-		for (i=0; i<num; i++) {
-			start = end;
-			end = Math.min(end+chunk, list.length());
-			if (rem > 0) {
-				end++;
-				rem--;
-			}
-			new_list[i] = list.slice(start, end);
-		}
-        
-		myWorker = new Worker("parallel.js")
-        myWorker.postMessage("sum_list", new_list)
-
-    // Everything below is deprecated
-		this.context.inputs[2] = p;
-	} else {
-		p = this.context.inputs[2];
-		if (p.operation._resolved) {
-			sum = 0;
-			for (i=0; i<p.data.length; i++) {
-				sum = sum + p.data[i];
-			}
-			return sum;
-		}
-	}
-		
-	this.pushContext('doYield');
-	this.pushContext();
-	
-	/*
-	if (this.context.inputs.length < 3) {
-		f = function addNum(n) {return global.env.a + Number(n)};
-		p = new Parallel(list.asArray(), {env: {a: num}});
-		p.map(f);
-		this.context.inputs[2] = p;
-	} else {
-		p = this.context.inputs[2];
-		if (p.operation._resolved) {
-			return new List(p.data);
-		};
-	}
-	*/
-};
 
 const workerSource = `
 self.onmessage = function(e) {
@@ -10125,101 +10055,123 @@ self.onmessage = function(e) {
     const type = msg.type;
     const data = msg.data;
     const workerId = msg.id;
+    self.WORKER_ID = msg.id;
 
     try {
         if (type === 'map') {
-            // ...existing code...
-        }
-        else if (type === 'loop') {
-            // Parallel For Loop
-            // data contains { start, end, step } for this chunk
-            
-            let varDecls = '';
-            let returnObj = '{';
-            const declared = new Set();
+            self.postMessage({ 
+                type: 'log', 
+                message: 'Worker ' + workerId + ' started. Items: ' + data.length
+            });
 
-            // 1. FirstPrivate (Declared & Initialized)
-            if (msg.firstPrivate) {
-                msg.firstPrivate.forEach(obj => {
-                    const name = Object.keys(obj)[0];
-                    const val = obj[name];
-                    varDecls += 'let ' + name + ' = ' + JSON.stringify(val) + ';\\n';
-                    returnObj += name + ': ' + name + ',';
-                    declared.add(name);
-                });
-            }
+            const mapper = new Function(...msg.args, msg.mapperCode);
+            const mappedData = data.map(item => mapper(item));
 
-            // 2. Private (Declared & Initialized)
-            if (msg.private) {
-                msg.private.forEach(name => {
-                    if (!declared.has(name)) {
-                        let init = '0';
-                        if (msg.initializations && msg.initializations[name]) {
-                            init = msg.initializations[name];
-                        }
-                        varDecls += 'let ' + name + ' = ' + init + ';\\n';
-                        declared.add(name);
-                    }
-                });
-            }
-
-            // 3. LastPrivate (Declared if needed, Returned)
-            if (msg.lastPrivate) {
-                msg.lastPrivate.forEach(name => {
-                    if (!declared.has(name)) {
-                        let init = '0';
-                        if (msg.initializations && msg.initializations[name]) {
-                            init = msg.initializations[name];
-                        }
-                        varDecls += 'let ' + name + ' = ' + init + ';\\n';
-                        declared.add(name);
-                    }
-                    // Ensure it is added to the return object
-                    if (!returnObj.includes(name + ':')) {
-                         returnObj += name + ': ' + name + ',';
-                    }
-                });
-            }
-
-            // 4. Reduction Vars (Ensure returned)
-            if (msg.reductionVars) {
-                 msg.reductionVars.forEach(name => {
-                    if (!declared.has(name)) {
-                        varDecls += 'let ' + name + ' = 0;\\n';
-                        declared.add(name);
-                    }
-                    if (!returnObj.includes(name + ':')) {
-                         returnObj += name + ': ' + name + ',';
-                    }
-                 });
-            }
-
-            returnObj += '}';
-
-            const start = data.start;
-            const end = data.end;
-            const loopVar = msg.args[0];
-
-            const workerCode = 
-                varDecls +
-                'for (let ' + loopVar + ' = ' + start + '; ' + loopVar + ' <= ' + end + '; ' + loopVar + '++) {' +
-                    msg.code +
-                '}' +
-                'return ' + returnObj + ';';
-            
-            const workerFunc = new Function(workerCode);
-            const resultVars = workerFunc();
-            
-            self.postMessage({ type: 'done', results: resultVars });
-        }
-        else if (type === "foreach") {
-            const loopBody = new Function(...msg.args, msg.code);
-    
-            try {
-                for (let i = 0; i < data.length; i++) {
-                    loopBody(data[i]);
+            if (msg.reducerCode) {
+                // If the chunk resulted in no data, return null
+                if (mappedData.length === 0) {
+                    self.postMessage({ type: 'result', result: null, empty: true });
+                    return;
                 }
-                self.postMessage({ type: "done" });
+
+                const reducer = new Function(...msg.reduceArgs, msg.reducerCode);
+                const reducedValue = mappedData.reduce((acc, val) => reducer(acc, val));
+
+                self.postMessage({ 
+                    type: 'log', 
+                    message: 'Worker ' + workerId + ' finished local reduce: ' + reducedValue 
+                });
+
+                self.postMessage({ type: 'result', result: reducedValue });
+            } 
+            else {
+                self.postMessage({ type: 'result', result: mappedData });
+            }
+        }
+        else if (type === 'loop' || type === 'foreach') {
+            try {
+                // Parallel For Loop
+                // data contains { start, end, step } for this chunk
+                const isLoop = type === 'loop';
+
+                let varDecls = '';
+                let returnObj = '{';
+                const declared = new Set();
+
+                // 1. FirstPrivate (Declared & Initialized)
+                if (msg.firstPrivate) {
+                    msg.firstPrivate.forEach(obj => {
+                        const name = Object.keys(obj)[0];
+                        const val = obj[name];
+                        varDecls += 'let ' + name + ' = ' + JSON.stringify(val) + ';\\n';
+                        returnObj += name + ': ' + name + ',';
+                        declared.add(name);
+                    });
+                }
+
+                // 2. Private (Declared & Initialized)
+                if (msg.private) {
+                    msg.private.forEach(name => {
+                        if (!declared.has(name)) {
+                            let init = '0';
+                            if (msg.initializations && msg.initializations[name]) {
+                                init = msg.initializations[name];
+                            }
+                            varDecls += 'let ' + name + ' = ' + init + ';\\n';
+                            declared.add(name);
+                        }
+                    });
+                }
+
+                // 3. LastPrivate (Declared if needed, Returned)
+                if (msg.lastPrivate) {
+                    msg.lastPrivate.forEach(name => {
+                        if (!declared.has(name)) {
+                            let init = '0';
+                            if (msg.initializations && msg.initializations[name]) {
+                                init = msg.initializations[name];
+                            }
+                            varDecls += 'let ' + name + ' = ' + init + ';\\n';
+                            declared.add(name);
+                        }
+                        // Ensure it is added to the return object
+                        if (!returnObj.includes(name + ':')) {
+                            returnObj += name + ': ' + name + ',';
+                        }
+                    });
+                }
+
+                // 4. Reduction Vars (Ensure returned)
+                if (msg.reductionVars) {
+                    msg.reductionVars.forEach(name => {
+                        if (!declared.has(name)) {
+                            varDecls += 'let ' + name + ' = 0;\\n';
+                            declared.add(name);
+                        }
+                        if (!returnObj.includes(name + ':')) {
+                            returnObj += name + ': ' + name + ',';
+                        }
+                    });
+                }
+
+                returnObj += '}';
+
+                const arg = msg.args[0];
+
+                const workerCode = 
+                    varDecls + 
+                    (isLoop 
+                        ? 'for (let ' + arg + ' = ' + data.start + '; ' + arg + ' <= ' + data.end + '; ' + arg + '++) {' 
+                        : 'for (let i = 0; i < data.length; i++) {' + arg + ' = data[i];'
+                    ) +
+                        msg.code +
+                    '}' + 
+                    'return ' + returnObj + ';';
+
+                const workerFunc = new Function(isLoop ? '' : 'data', workerCode);
+                const resultVars = workerFunc(isLoop ? undefined : msg.data);
+                
+                self.postMessage({ type: 'done', results: resultVars });
             } catch (error) {
                 self.postMessage({ error: error.toString()});
             }
@@ -10243,10 +10195,13 @@ function createWorkers(n) {
 }
 
 function chunk(array, nChunks) {
-    const size = Math.ceil(array.length / nChunks);
     const chunks = [];
-    for (let i = 0; i < array.length; i += size) {
-        chunks.push(array.slice(i, i + size));
+    let start = 0;
+  
+    for (let i = 0; i < nChunks; i++) {
+        const size = Math.ceil((array.length - start) / (nChunks - i));
+        chunks.push(array.slice(start, start + size));
+        start += size;
     }
     return chunks;
 }
@@ -10340,6 +10295,8 @@ function parallelMap(workers, jsArray, mapperBody, mapParams, reducerBody, reduc
 Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
     this.assertType(list, 'list');
     if (list.length() === 0) return new List();
+    const timerLabel = "ParallelMap Job " + Date.now();
+    console.time(timerLabel);
 
     const countInput = (typeof numWorkers === 'object' && numWorkers) ? numWorkers.evaluate() : numWorkers;
     const workerCount = Number(countInput) || navigator.hardwareConcurrency || 4;
@@ -10358,9 +10315,64 @@ Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
         return parallelMap(workers, jsArray, fullBody, paramNames, null, null)
             .then(resultArray => {
                 workers.forEach(w => w.terminate());
+                console.timeEnd(timerLabel);
                 return new List(resultArray);
             });
     });
+};
+
+Process.prototype.reportWebAssemblyParallelMap = function (mapper, list, numWorkers) {
+    var mod = window.Module;
+
+    if (!mod || !mod._malloc) {
+        throw new Error("WebAssembly Module is not loaded.");
+    }
+
+    var jsArray = list.asArray(); 
+    var length = jsArray.length;
+    var opCode = 0; 
+    var parameter = 0;
+
+    var expression = mapper.expression; 
+    var selector = expression.selector;
+
+    var inputs = expression.inputs();
+    for (var i = 0; i < inputs.length; i++) {
+        var val = parseFloat(inputs[i]); 
+        if (!isNaN(val)) {
+            parameter = val;
+            break;
+        }
+    }
+
+    if (selector === 'reportSum') {
+        opCode = 1; 
+    } 
+    else if (selector === 'reportProduct') {
+        opCode = 2; 
+    } 
+    else {
+        throw new Error("Unsupported block. Please use (+) or (*).");
+    }
+
+    var bytesPerElement = 8; 
+    var dataPtr = mod._malloc(length * bytesPerElement);
+    var heapOffset = dataPtr / bytesPerElement;
+
+    mod.HEAPF64.set(jsArray, heapOffset);
+
+    var resultStatus = mod._wasm_process_array(opCode, dataPtr, length, parameter);
+
+    if (isNaN(resultStatus)) {
+        mod._free(dataPtr);
+        throw new Error("C code returned error (NAN).");
+    }
+
+    var resultSubarray = mod.HEAPF64.subarray(heapOffset, heapOffset + length);
+    var resultList = Array.from(resultSubarray);
+
+    mod._free(dataPtr);
+    return new List(resultList);
 };
 
 
@@ -10416,18 +10428,186 @@ Process.prototype.reportMapReduce = function(mapper, reducer, list, numWorkers) 
 };
 
 function chunkRange(start, end, nChunks) {
-    const total = end - start + 1;
-    const size = Math.ceil(total / nChunks);
     const chunks = [];
+  
     for (let i = 0; i < nChunks; i++) {
-        const chunkStart = start + (i * size);
-        const chunkEnd = Math.min(end, chunkStart + size - 1);
-        if (chunkStart <= chunkEnd) {
-            chunks.push({ start: chunkStart, end: chunkEnd });
-        }
+        const size = Math.ceil((end - start + 1) / (nChunks - i));
+        chunks.push({ start: start, end: start + size - 1});
+        start += size;
     }
     return chunks;
 }
+
+function prepVariables(firstPrivate, privateVars, lastPrivateVars, reductionVars, variables) {
+    // Helper to filter valid variable names
+    const filterVarNames = (list) => {
+        if (list instanceof List) {
+            return list.itemsArray().filter(name => name && typeof name === 'string' && name.trim().length > 0);
+        }
+        return [];
+    };
+
+    let firstPrivateList = [];
+    if (firstPrivate instanceof List) {
+            firstPrivateList = filterVarNames(firstPrivate).map(varName => {
+            return {[varName]: variables.getVar(varName)};
+        });
+    }
+    
+    let privateList = filterVarNames(privateVars);
+    let lastPrivateList = filterVarNames(lastPrivateVars);
+    let reductionList = filterVarNames(reductionVars);
+
+    // Check for duplicate variable usage across different lists
+    const firstPrivateNames = firstPrivateList.map(obj => Object.keys(obj)[0]);
+    const usageMap = new Map();
+    
+    const allowedDuplicates = new Set([
+        'firstPrivate:lastPrivate',
+        'lastPrivate:firstPrivate'
+    ]);
+
+    const checkDuplicates = (names, listName) => {
+        for (const name of names) {
+            if (usageMap.has(name) && !allowedDuplicates.has(`${listName}:${usageMap.get(name)}`)) {
+                throw new Error(`Variable '${name}' cannot be used in both '${usageMap.get(name)}' and '${listName}'`);
+            }
+            usageMap.set(name, listName);
+        }
+    };
+
+    try {
+        checkDuplicates(firstPrivateNames, 'firstPrivate');
+        checkDuplicates(privateList, 'private');
+        checkDuplicates(lastPrivateList, 'lastPrivate');
+        checkDuplicates(reductionList, 'reduction');
+    } catch (e) {
+        throw new Error(e);
+    }
+
+    return {firstPrivateList, privateList, lastPrivateList, reductionList};
+}
+
+function transpileBody(script, paramNames, privateList, lastPrivateList, reductions) {
+    let jsCode = '';
+    let reductionCodes = [];
+    let initializations = {};
+
+    try {
+        // Transpile the script body
+        if (script && script.expression && typeof script.expression.transpileForWorker === 'function') {
+            jsCode = script.expression.transpileForWorker(paramNames);
+            
+            // Optimization: Lift initializations of private/lastPrivate vars out of the loop
+            const privateVarsSet = new Set([...privateList, ...lastPrivateList]);
+            
+            while (true) {
+                // Match "varName = ...;" at the start of the code
+                const match = jsCode.match(/^\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(.+?);\s*/);
+                
+                if (match) {
+                    const varName = match[1];
+                    const initExpr = match[2];
+                    const fullMatch = match[0];
+                    
+                    if (privateVarsSet.has(varName)) {
+                        // Check if initExpr uses the loop variable
+                        const upvarRegex = new RegExp(`\\b${upvar}\\b`);
+                        if (upvarRegex.test(initExpr)) {
+                            break; // Cannot lift initialization that depends on loop variable
+                        }
+
+                        // Remove from jsCode
+                        jsCode = jsCode.substring(fullMatch.length);
+                        initializations[varName] = initExpr;
+                    } else {
+                        break; // Not a private var assignment, stop looking
+                    }
+                } else {
+                    break; // No assignment found
+                }
+            }
+        }
+        
+        // Transpile reductions
+        if (reductions instanceof List) {
+            reductionCodes = reductions.itemsArray().map(ring => {
+                if (ring && ring.expression && typeof ring.expression.transpileForWorker === 'function') {
+                    return ring.expression.transpileForWorker(['a', 'b']);
+                }
+                return null;
+            });
+        }
+    } catch (e) {
+        console.log(e.message)
+        throw new Error(e.message);
+    }
+
+    return {jsCode, reductionCodes, initializations};
+}
+
+async function runWorkers(chunks, functionType, jsCode, paramNames, firstPrivateList, privateList, lastPrivateList, reductionList, reductionCodes, initializations, variables) {
+    const workers = createWorkers(chunks.length);
+
+    return Promise.all(
+        workers.map((worker, i) => {
+            return new Promise((resolve, reject) => {
+                worker.onmessage = msg => {
+                    if (msg.data.type === 'done') resolve(msg.data.results);
+                    else if (msg.data.error) reject(new Error(msg.data.error));
+                };
+                worker.onerror = err => reject(err);
+                
+                worker.postMessage({
+                    type: functionType,
+                    id: i + 1,
+                    data: chunks[i],
+                    code: jsCode,
+                    args: paramNames,
+                    firstPrivate: firstPrivateList,
+                    private: privateList,
+                    lastPrivate: lastPrivateList,
+                    reductionVars: reductionList,
+                    initializations: initializations
+                });
+            });
+        })
+    ).then((results) => {
+        workers.forEach(w => w.terminate());
+        
+        // Handle LastPrivate
+        if (lastPrivateList.length > 0) {
+            const lastResult = results[results.length - 1];
+            lastPrivateList.forEach(name => {
+                if (lastResult && lastResult[name] !== undefined) {
+                    variables.setVar(name, lastResult[name]);
+                }
+            });
+        }
+
+        // Handle Reduction
+        if (reductionList.length > 0) {
+            reductionList.forEach((varName, index) => {
+                // Get corresponding reduction code
+                let code = reductionCodes[index];
+                if (!code && reductionCodes.length > 0) {
+                        code = reductionCodes[Math.min(index, reductionCodes.length - 1)];
+                }
+
+                if (code) {
+                    const reducer = new Function('a', 'b', `return ${code};`);
+                    const values = results.map(r => r[varName]);
+                    const validValues = values.filter(v => v !== undefined);
+
+                    if (validValues.length > 0) {
+                        const finalValue = validValues.reduce((acc, val) => reducer(acc, val));
+                        variables.setVar(varName, finalValue);
+                    }
+                }
+            });
+        }
+    });
+};
 
 Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, firstPrivate, privateVars, lastPrivateVars, reductionVars, reductions, script) {
     const startVal = Number(start);
@@ -10439,167 +10619,27 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, first
     if (startVal > endVal) return;
 
     return this.awaitPromise(() => {
-        // Helper to filter valid variable names
-        const filterVarNames = (list) => {
-            if (list instanceof List) {
-                return list.itemsArray().filter(name => name && typeof name === 'string' && name.trim().length > 0);
-            }
-            return [];
-        };
-
-        let firstPrivateList = [];
-        if (firstPrivate instanceof List) {
-             firstPrivateList = filterVarNames(firstPrivate).map(varName => {
-                return {[varName]: this.context.variables.getVar(varName)};
-            });
-        }
-        
-        let privateList = filterVarNames(privateVars);
-        let lastPrivateList = filterVarNames(lastPrivateVars);
-        let reductionList = filterVarNames(reductionVars);
-
-        // Check for duplicate variable usage across different lists
-        const firstPrivateNames = firstPrivateList.map(obj => Object.keys(obj)[0]);
-        const usageMap = new Map();
-        
-        const checkDuplicates = (names, listName) => {
-            for (const name of names) {
-                if (usageMap.has(name)) {
-                    throw new Error(`Variable '${name}' cannot be used in both '${usageMap.get(name)}' and '${listName}'`);
-                }
-                usageMap.set(name, listName);
-            }
-        };
-
+        let firstPrivateList, privateList, lastPrivateList, reductionList;
         try {
-            checkDuplicates(firstPrivateNames, 'firstPrivate');
-            checkDuplicates(privateList, 'private');
-            checkDuplicates(lastPrivateList, 'lastPrivate');
-            checkDuplicates(reductionList, 'reduction');
+            ({firstPrivateList, privateList, lastPrivateList, reductionList} = prepVariables(firstPrivate, privateVars, lastPrivateVars, reductionVars, this.context.variables));
         } catch (e) {
             return Promise.reject(e);
         }
 
         const paramNames = [upvar]; // The loop variable name
-        let jsCode = '';
-        let reductionCodes = [];
-        let initializations = {};
-        
+        let jsCode, reductionCodes, initializations;
         try {
-            // Transpile the script body
-            if (script && script.expression && typeof script.expression.transpileForWorker === 'function') {
-                jsCode = script.expression.transpileForWorker(paramNames);
-                
-                // Optimization: Lift initializations of private/lastPrivate vars out of the loop
-                const privateVarsSet = new Set([...privateList, ...lastPrivateList]);
-                
-                while (true) {
-                    // Match "varName = ...;" at the start of the code
-                    const match = jsCode.match(/^\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(.+?);\s*/);
-                    
-                    if (match) {
-                        const varName = match[1];
-                        const initExpr = match[2];
-                        const fullMatch = match[0];
-                        
-                        if (privateVarsSet.has(varName)) {
-                            // Check if initExpr uses the loop variable
-                            const upvarRegex = new RegExp(`\\b${upvar}\\b`);
-                            if (upvarRegex.test(initExpr)) {
-                                break; // Cannot lift initialization that depends on loop variable
-                            }
-
-                            // Remove from jsCode
-                            jsCode = jsCode.substring(fullMatch.length);
-                            initializations[varName] = initExpr;
-                        } else {
-                            break; // Not a private var assignment, stop looking
-                        }
-                    } else {
-                        break; // No assignment found
-                    }
-                }
-            }
-            
-            // Transpile reductions
-            if (reductions instanceof List) {
-                reductionCodes = reductions.itemsArray().map(ring => {
-                    if (ring && ring.expression && typeof ring.expression.transpileForWorker === 'function') {
-                        return ring.expression.transpileForWorker(['a', 'b']);
-                    }
-                    return null;
-                });
-            }
+            ({jsCode, reductionCodes, initializations} = transpileBody(script, paramNames, privateList, lastPrivateList, reductions));
         } catch (e) {
-            console.log(e.message)
-            return Promise.reject(e.message);
+            return Promise.reject(e);
         }
 
         const chunks = chunkRange(startVal, endVal, workerCount);
-        const workers = createWorkers(chunks.length);
-
-        return Promise.all(
-            workers.map((worker, i) => {
-                return new Promise((resolve, reject) => {
-                    worker.onmessage = msg => {
-                        if (msg.data.type === 'done') resolve(msg.data.results);
-                        else if (msg.data.error) reject(new Error(msg.data.error));
-                    };
-                    worker.onerror = err => reject(err);
-                    
-                    worker.postMessage({
-                        type: 'loop',
-                        id: i + 1,
-                        data: chunks[i],
-                        code: jsCode,
-                        args: paramNames,
-                        firstPrivate: firstPrivateList,
-                        private: privateList,
-                        lastPrivate: lastPrivateList,
-                        reductionVars: reductionList,
-                        initializations: initializations
-                    });
-                });
-            })
-        ).then((results) => {
-            workers.forEach(w => w.terminate());
-            
-            // Handle LastPrivate
-            if (lastPrivateList.length > 0) {
-                const lastResult = results[results.length - 1];
-                lastPrivateList.forEach(name => {
-                    if (lastResult && lastResult[name] !== undefined) {
-                        this.context.variables.setVar(name, lastResult[name]);
-                    }
-                });
-            }
-
-            // Handle Reduction
-            if (reductionList.length > 0) {
-                reductionList.forEach((varName, index) => {
-                    // Get corresponding reduction code
-                    let code = reductionCodes[index];
-                    if (!code && reductionCodes.length > 0) {
-                         code = reductionCodes[Math.min(index, reductionCodes.length - 1)];
-                    }
-
-                    if (code) {
-                        const reducer = new Function('a', 'b', `return ${code};`);
-                        const values = results.map(r => r[varName]);
-                        const validValues = values.filter(v => v !== undefined);
-
-                        if (validValues.length > 0) {
-                            const finalValue = validValues.reduce((acc, val) => reducer(acc, val));
-                            this.context.variables.setVar(varName, finalValue);
-                        }
-                    }
-                });
-            }
-        });
+        return runWorkers(chunks, 'loop', jsCode, paramNames, firstPrivateList, privateList, lastPrivateList, reductionList, reductionCodes, initializations, this.context.variables);
     });
 };
 
-Process.prototype.doParallelForEach = function (upvar, list, numWorkers, script) {
+Process.prototype.doParallelForEach = function (upvar, list, numWorkers, firstPrivate, privateVars, lastPrivateVars, reductionVars, reductions, script) {
     this.assertType(list, 'list');
     if (list.length() === 0) return;
 
@@ -10608,45 +10648,24 @@ Process.prototype.doParallelForEach = function (upvar, list, numWorkers, script)
     const correctWorkerCount = Math.min(workerCount, list.length());
 
     return this.awaitPromise(() => {
-        const paramNames = [upvar]; // The loop variable name
-        let jsCode = '';
-        
+        let firstPrivateList, privateList, lastPrivateList, reductionList;
         try {
-            // Transpile the script body
-            if (script && typeof script.expression.transpileForWorker === 'function') {
-                jsCode = script.expression.transpileForWorker(paramNames);
-                console.log(jsCode)
-            }
+            ({firstPrivateList, privateList, lastPrivateList, reductionList} = prepVariables(firstPrivate, privateVars, lastPrivateVars, reductionVars, this.context.variables));
         } catch (e) {
-            console.log(e.message)
-            return Promise.reject(e.message);
+            return Promise.reject(e);
+        }
+
+        const paramNames = [upvar]; // The loop variable name
+        let jsCode, reductionCodes, initializations;
+        try {
+            ({jsCode, reductionCodes, initializations} = transpileBody(script, paramNames, privateList, lastPrivateList, reductions));
+        } catch (e) {
+            return Promise.reject(e);
         }
 
         const jsArray = list.itemsArray();
         const chunks = chunk(jsArray, correctWorkerCount);
-        const workers = createWorkers(chunks.length);
-
-        return Promise.all(
-            workers.map((worker, i) => {
-                return new Promise((resolve, reject) => {
-                    worker.onmessage = msg => {
-                        if (msg.data.type === 'done') resolve();
-                        else if (msg.data.error) reject(new Error(msg.data.error));
-                    };
-                    worker.onerror = err => reject(err);
-                    
-                    worker.postMessage({
-                        type: 'foreach',
-                        id: i + 1,
-                        data: chunks[i],
-                        code: jsCode,
-                        args: paramNames
-                    });
-                });
-            })
-        ).then(() => {
-            workers.forEach(w => w.terminate());
-        });
+        return runWorkers(chunks, 'foreach', jsCode, paramNames, firstPrivateList, privateList, lastPrivateList, reductionList, reductionCodes, initializations, this.context.variables);
     });
 };
 

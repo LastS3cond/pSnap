@@ -10125,6 +10125,7 @@ self.onmessage = function(e) {
     const type = msg.type;
     const data = msg.data;
     const workerId = msg.id;
+    self.WORKER_ID = msg.id;
 
     try {
         if (type === 'map') {

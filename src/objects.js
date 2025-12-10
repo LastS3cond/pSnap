@@ -1192,6 +1192,11 @@ SpriteMorph.prototype.primitiveBlocks = function () {
             defaults: ['item', null, 4],
             code: 'parallelForEach'
         },
+        reportGetWorkerId: {
+            type: 'reporter',
+            category: 'variables',
+            spec: 'get worker id',
+        },
         doWait: {
             type: 'command',
             category: 'control',
@@ -4164,6 +4169,7 @@ SpriteMorph.prototype.blockTemplates = function (
         blocks.push(block('reportMapReduce'));
         blocks.push(block('doParallelFor'));
         blocks.push(block('doParallelForEach'));
+        blocks.push(block('reportGetWorkerId'));
         blocks.push(block('reportLoadWasm'))
         if (SpriteMorph.prototype.showingExtensions) {
             blocks.push('=');

@@ -100,6 +100,7 @@
             case 'reportVariadicOr': return this.transpileVariadic(inputs, paramNames, '||', 'false');
             case 'reportJoinWords': return this.transpileVariadic(inputs, paramNames, '+', '""', true);
             case 'reportMonadic': return this.transpileMonadic(inputs, paramNames);
+            case 'reportGetWorkerId': return 'WORKER_ID';
             default: return 'item'; 
         }
     };

@@ -10393,6 +10393,10 @@ Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
     });
 };
 
+Process.prototype.reportWebAssemblyParallelMap = function (mapper, list, numWorkers) {
+    
+} 
+
 
 Process.prototype.reportMapReduce = function(mapper, reducer, list, numWorkers) {
     this.assertType(list, 'list');

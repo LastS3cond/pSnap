@@ -1755,7 +1755,7 @@ IDE_Morph.prototype.createCategories = function () {
             colors,
             myself, // the IDE is the target
             categorySelectionAction(category),
-            category, // label
+            category[0].toUpperCase().concat(category.slice(1)), // label
             categoryQueryAction(category), // query
             null, // env
             null, // hint

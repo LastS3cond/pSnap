@@ -176,6 +176,7 @@ SpriteMorph.prototype.blockColor = {
 };
 
 SpriteMorph.prototype.customCategories = new Map(); // key: name, value: color
+SpriteMorph.prototype.customCategories.set("parallel", new Color(0, 139, 139));
 
 SpriteMorph.prototype.allCategories = function () {
     return this.categories.concat(
@@ -1149,31 +1150,31 @@ SpriteMorph.prototype.primitiveBlocks = function () {
         },
         reportParallelMap: {
             type: 'reporter',
-            category: 'variables',
+            category: 'parallel',
             spec: 'parallel map %repRing over %l with %n workers',//%parallel'
             defaults: [null, null, 4]
         },
         reportWebAssemblyParallelMap: {
             type: 'reporter',
-            category: 'variables',
+            category: 'parallel',
             spec: 'parallel web assembly map %repRing over %l with %n workers',//%parallel'
             defaults: [null, null, 4]
         },
         reportLoadWasm: {
             type: 'reporter',
-            category: 'variables',
+            category: 'parallel',
             spec: 'load wasm file from %s',
             defaults: [null]
         },
         reportMapReduce: {
             type: 'reporter',
-            category: 'variables',
+            category: 'parallel',
             spec: 'parallel map %repRing reduce %repRing over %l with %n workers',
             defaults: [null, null, null, 4]
         },
         doParallelFor: {
             type: 'command',
-            category: 'variables',
+            category: 'parallel',
             spec: 'parallel for %upvar = %n to %n with %n workers; firstPrivate %mult%var ; private %mult%var ; lastPrivate %mult%var ; reduce %mult%var using %mult%repRing %cla',
             defaults: ['i', 1, 10, 4],
             code: 'parallelFor'
@@ -1187,14 +1188,14 @@ SpriteMorph.prototype.primitiveBlocks = function () {
         //         },
         doParallelForEach: {
             type: 'command',
-            category: 'variables',
+            category: 'parallel',
             spec: 'parallel for each %upvar in %l with %n workers %cla',
             defaults: ['item', null, 4],
             code: 'parallelForEach'
         },
         reportGetWorkerId: {
             type: 'reporter',
-            category: 'variables',
+            category: 'parallel',
             spec: 'get worker id',
         },
         doWait: {
@@ -4164,13 +4165,7 @@ SpriteMorph.prototype.blockTemplates = function (
         blocks.push(block('reportConcatenatedLists'));
         blocks.push(block('reportReshape'));
         blocks.push(block('reportCrossproduct'));
-        blocks.push(block('reportParallelMap'));
-        blocks.push(block('reportWebAssemblyParallelMap'));
-        blocks.push(block('reportMapReduce'));
-        blocks.push(block('doParallelFor'));
-        blocks.push(block('doParallelForEach'));
-        blocks.push(block('reportGetWorkerId'));
-        blocks.push(block('reportLoadWasm'))
+
         if (SpriteMorph.prototype.showingExtensions) {
             blocks.push('=');
             blocks.push(block('doPrimitive'));
@@ -4194,6 +4189,14 @@ SpriteMorph.prototype.blockTemplates = function (
             blocks.push('-');
             blocks.push(block('doShowTable'));
         }
+    } else if (category === 'parallel') {
+        blocks.push(block('reportParallelMap'));
+        blocks.push(block('reportWebAssemblyParallelMap'));
+        blocks.push(block('reportMapReduce'));
+        blocks.push(block('doParallelFor'));
+        blocks.push(block('doParallelForEach'));
+        blocks.push(block('reportGetWorkerId'));
+        blocks.push(block('reportLoadWasm'))
     }
 
     return blocks;

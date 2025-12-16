@@ -10178,8 +10178,8 @@ self.onmessage = function(e) {
                     '}' + 
                     'return ' + returnObj + ';';
 
-                const workerFunc = new Function(isLoop ? '' : 'data', workerCode);
-                const resultVars = workerFunc(isLoop ? undefined : msg.data);
+                const workerFunc = new Function('data', 'shared', workerCode);
+                const resultVars = workerFunc(isLoop ? undefined : msg.data, msg.shared);
                 
                 self.postMessage({ type: 'done', results: resultVars });
             } catch (error) {
@@ -10448,7 +10448,7 @@ function chunkRange(start, end, nChunks) {
     return chunks;
 }
 
-function prepVariables(firstPrivate, privateVars, lastPrivateVars, reductionVars, variables) {
+function prepVariables(firstPrivate, privateVars, lastPrivateVars, sharedVars, reductionVars, variables) {
     // Helper to filter valid variable names
     const filterVarNames = (list) => {
         if (list instanceof List) {
@@ -10466,6 +10466,7 @@ function prepVariables(firstPrivate, privateVars, lastPrivateVars, reductionVars
     
     let privateList = filterVarNames(privateVars);
     let lastPrivateList = filterVarNames(lastPrivateVars);
+    let sharedList = filterVarNames(sharedVars);
     let reductionList = filterVarNames(reductionVars);
 
     // Check for duplicate variable usage across different lists
@@ -10490,15 +10491,16 @@ function prepVariables(firstPrivate, privateVars, lastPrivateVars, reductionVars
         checkDuplicates(firstPrivateNames, 'firstPrivate');
         checkDuplicates(privateList, 'private');
         checkDuplicates(lastPrivateList, 'lastPrivate');
+        checkDuplicates(sharedList, 'shared');
         checkDuplicates(reductionList, 'reduction');
     } catch (e) {
         throw new Error(e);
     }
 
-    return {firstPrivateList, privateList, lastPrivateList, reductionList};
+    return {firstPrivateList, privateList, lastPrivateList, sharedList, reductionList};
 }
 
-function transpileBody(script, paramNames, privateList, lastPrivateList, reductions) {
+function transpileBody(script, paramNames, privateList, lastPrivateList, sharedList = [], reductions) {
     let jsCode = '';
     let reductionCodes = [];
     let initializations = {};
@@ -10506,7 +10508,7 @@ function transpileBody(script, paramNames, privateList, lastPrivateList, reducti
     try {
         // Transpile the script body
         if (script && script.expression && typeof script.expression.transpileForWorker === 'function') {
-            jsCode = script.expression.transpileForWorker(paramNames);
+            jsCode = script.expression.transpileForWorker(paramNames, sharedList);
             
             // Optimization: Lift initializations of private/lastPrivate vars out of the loop
             const privateVarsSet = new Set([...privateList, ...lastPrivateList]);
@@ -10556,7 +10558,7 @@ function transpileBody(script, paramNames, privateList, lastPrivateList, reducti
     return {jsCode, reductionCodes, initializations};
 }
 
-async function runWorkers(chunks, functionType, jsCode, paramNames, firstPrivateList, privateList, lastPrivateList, reductionList, reductionCodes, initializations, variables) {
+async function runWorkers(chunks, functionType, jsCode, paramNames, firstPrivateList, privateList, lastPrivateList, sabVars, reductionList, reductionCodes, initializations, variables) {
     const workers = createWorkers(chunks.length);
 
     return Promise.all(
@@ -10577,6 +10579,7 @@ async function runWorkers(chunks, functionType, jsCode, paramNames, firstPrivate
                     firstPrivate: firstPrivateList,
                     private: privateList,
                     lastPrivate: lastPrivateList,
+                    shared: sabVars,
                     reductionVars: reductionList,
                     initializations: initializations
                 });
@@ -10594,6 +10597,11 @@ async function runWorkers(chunks, functionType, jsCode, paramNames, firstPrivate
                 }
             });
         }
+
+        // Handle shared
+        Object.keys(sabVars).forEach(name => {
+            variables.setVar(name, Atomics.load(sabVars[name], 0));
+        });
 
         // Handle Reduction
         if (reductionList.length > 0) {
@@ -10619,7 +10627,7 @@ async function runWorkers(chunks, functionType, jsCode, paramNames, firstPrivate
     });
 };
 
-Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, firstPrivate, privateVars, lastPrivateVars, reductionVars, reductions, script) {
+Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, firstPrivate, privateVars, lastPrivateVars, sharedVars, reductionVars, reductions, script) {
     const startVal = Number(start);
     const endVal = Number(end);
     const countInput = (typeof numWorkers === 'object' && numWorkers) ? numWorkers.evaluate() : numWorkers;
@@ -10629,9 +10637,9 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, first
     if (startVal > endVal) return;
 
     return this.awaitPromise(() => {
-        let firstPrivateList, privateList, lastPrivateList, reductionList;
+        let firstPrivateList, privateList, lastPrivateList, sharedList, reductionList;
         try {
-            ({firstPrivateList, privateList, lastPrivateList, reductionList} = prepVariables(firstPrivate, privateVars, lastPrivateVars, reductionVars, this.context.variables));
+            ({firstPrivateList, privateList, lastPrivateList, sharedList, reductionList} = prepVariables(firstPrivate, privateVars, lastPrivateVars, sharedVars, reductionVars, this.context.variables));
         } catch (e) {
             return Promise.reject(e);
         }
@@ -10639,17 +10647,23 @@ Process.prototype.doParallelFor = function (upvar, start, end, numWorkers, first
         const paramNames = [upvar]; // The loop variable name
         let jsCode, reductionCodes, initializations;
         try {
-            ({jsCode, reductionCodes, initializations} = transpileBody(script, paramNames, privateList, lastPrivateList, reductions));
+            ({jsCode, reductionCodes, initializations} = transpileBody(script, paramNames, privateList, lastPrivateList, sharedList, reductions));
         } catch (e) {
             return Promise.reject(e);
         }
 
+        const sabVars = {};
+        sharedList.forEach(name => {
+            sabVars[name] = new Int32Array(new SharedArrayBuffer(4));
+            sabVars[name][0] = this.context.variables.getVar(name);
+        });
+
         const chunks = chunkRange(startVal, endVal, workerCount);
-        return runWorkers(chunks, 'loop', jsCode, paramNames, firstPrivateList, privateList, lastPrivateList, reductionList, reductionCodes, initializations, this.context.variables);
+        return runWorkers(chunks, 'loop', jsCode, paramNames, firstPrivateList, privateList, lastPrivateList, sabVars, reductionList, reductionCodes, initializations, this.context.variables);
     });
 };
 
-Process.prototype.doParallelForEach = function (upvar, list, numWorkers, firstPrivate, privateVars, lastPrivateVars, reductionVars, reductions, script) {
+Process.prototype.doParallelForEach = function (upvar, list, numWorkers, firstPrivate, privateVars, lastPrivateVars, sharedVars, reductionVars, reductions, script) {
     this.assertType(list, 'list');
     if (list.length() === 0) return;
 
@@ -10658,9 +10672,9 @@ Process.prototype.doParallelForEach = function (upvar, list, numWorkers, firstPr
     const correctWorkerCount = Math.min(workerCount, list.length());
 
     return this.awaitPromise(() => {
-        let firstPrivateList, privateList, lastPrivateList, reductionList;
+        let firstPrivateList, privateList, lastPrivateList, sharedList, reductionList;
         try {
-            ({firstPrivateList, privateList, lastPrivateList, reductionList} = prepVariables(firstPrivate, privateVars, lastPrivateVars, reductionVars, this.context.variables));
+            ({firstPrivateList, privateList, lastPrivateList, sharedList, reductionList} = prepVariables(firstPrivate, privateVars, lastPrivateVars, sharedVars, reductionVars, this.context.variables));
         } catch (e) {
             return Promise.reject(e);
         }
@@ -10668,14 +10682,20 @@ Process.prototype.doParallelForEach = function (upvar, list, numWorkers, firstPr
         const paramNames = [upvar]; // The loop variable name
         let jsCode, reductionCodes, initializations;
         try {
-            ({jsCode, reductionCodes, initializations} = transpileBody(script, paramNames, privateList, lastPrivateList, reductions));
+            ({jsCode, reductionCodes, initializations} = transpileBody(script, paramNames, privateList, lastPrivateList, sharedList, reductions));
         } catch (e) {
             return Promise.reject(e);
         }
 
+        const sabVars = {};
+        sharedList.forEach(name => {
+            sabVars[name] = new Int32Array(new SharedArrayBuffer(4));
+            sabVars[name][0] = this.context.variables.getVar(name);
+        });
+
         const jsArray = list.itemsArray();
         const chunks = chunk(jsArray, correctWorkerCount);
-        return runWorkers(chunks, 'foreach', jsCode, paramNames, firstPrivateList, privateList, lastPrivateList, reductionList, reductionCodes, initializations, this.context.variables);
+        return runWorkers(chunks, 'foreach', jsCode, paramNames, firstPrivateList, privateList, lastPrivateList, sabVars, reductionList, reductionCodes, initializations, this.context.variables);
     });
 };
 

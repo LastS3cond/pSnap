@@ -10059,7 +10059,6 @@ self.onmessage = function(e) {
             const mappedData = data.map(item => mapper(item));
 
             if (msg.reducerCode) {
-                // If the chunk resulted in no data, return null
                 if (mappedData.length === 0) {
                     self.postMessage({ type: 'result', result: null, empty: true });
                     return;
@@ -10081,7 +10080,6 @@ self.onmessage = function(e) {
         }
         else if (type === 'loop' || type === 'foreach') {
             try {
-                // Parallel For Loop
                 // data contains { start, end, step } for this chunk
                 const isLoop = type === 'loop';
 
@@ -10089,7 +10087,6 @@ self.onmessage = function(e) {
                 let returnObj = '{';
                 const declared = new Set();
 
-                // 1. FirstPrivate (Declared & Initialized)
                 if (msg.firstPrivate) {
                     msg.firstPrivate.forEach(obj => {
                         const name = Object.keys(obj)[0];
@@ -10100,7 +10097,6 @@ self.onmessage = function(e) {
                     });
                 }
 
-                // 2. Private (Declared & Initialized)
                 if (msg.private) {
                     msg.private.forEach(name => {
                         if (!declared.has(name)) {
@@ -10114,7 +10110,6 @@ self.onmessage = function(e) {
                     });
                 }
 
-                // 3. LastPrivate (Declared if needed, Returned)
                 if (msg.lastPrivate) {
                     msg.lastPrivate.forEach(name => {
                         if (!declared.has(name)) {
@@ -10125,14 +10120,12 @@ self.onmessage = function(e) {
                             varDecls += 'let ' + name + ' = ' + init + ';\\n';
                             declared.add(name);
                         }
-                        // Ensure it is added to the return object
                         if (!returnObj.includes(name + ':')) {
                             returnObj += name + ': ' + name + ',';
                         }
                     });
                 }
 
-                // 4. Reduction Vars (Ensure returned)
                 if (msg.reductionVars) {
                     msg.reductionVars.forEach(name => {
                         if (!declared.has(name)) {
@@ -10286,8 +10279,6 @@ function parallelMap(workers, jsArray, mapperBody, mapParams, reducerBody, reduc
 Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
     this.assertType(list, 'list');
     if (list.length() === 0) return new List();
-    const timerLabel = "ParallelMap Job " + Date.now();
-    console.time(timerLabel);
 
     const countInput = (typeof numWorkers === 'object' && numWorkers) ? numWorkers.evaluate() : numWorkers;
     const workerCount = Number(countInput) || navigator.hardwareConcurrency || 4;
@@ -10306,7 +10297,6 @@ Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
         return parallelMap(workers, jsArray, fullBody, paramNames, null, null)
             .then(resultArray => {
                 workers.forEach(w => w.terminate());
-                console.timeEnd(timerLabel);
                 return new List(resultArray);
             });
     });
@@ -10501,15 +10491,12 @@ function transpileBody(script, paramNames, privateList, lastPrivateList, sharedL
     let initializations = {};
 
     try {
-        // Transpile the script body
         if (script && script.expression && typeof script.expression.transpileForWorker === 'function') {
             jsCode = script.expression.transpileForWorker(paramNames, sharedList);
             
-            // Optimization: Lift initializations of private/lastPrivate vars out of the loop
             const privateVarsSet = new Set([...privateList, ...lastPrivateList]);
             
             while (true) {
-                // Match "varName = ...;" at the start of the code
                 const match = jsCode.match(/^\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(.+?);\s*/);
                 
                 if (match) {
@@ -10518,25 +10505,22 @@ function transpileBody(script, paramNames, privateList, lastPrivateList, sharedL
                     const fullMatch = match[0];
                     
                     if (privateVarsSet.has(varName)) {
-                        // Check if initExpr uses the loop variable
                         const upvarRegex = new RegExp(`\\b${upvar}\\b`);
                         if (upvarRegex.test(initExpr)) {
-                            break; // Cannot lift initialization that depends on loop variable
+                            break; 
                         }
 
-                        // Remove from jsCode
                         jsCode = jsCode.substring(fullMatch.length);
                         initializations[varName] = initExpr;
                     } else {
-                        break; // Not a private var assignment, stop looking
+                        break; 
                     }
                 } else {
-                    break; // No assignment found
+                    break; 
                 }
             }
         }
         
-        // Transpile reductions
         if (reductions instanceof List) {
             reductionCodes = reductions.itemsArray().map(ring => {
                 if (ring && ring.expression && typeof ring.expression.transpileForWorker === 'function') {
@@ -10593,15 +10577,12 @@ async function runWorkers(chunks, functionType, jsCode, paramNames, firstPrivate
             });
         }
 
-        // Handle shared
         Object.keys(sabVars).forEach(name => {
             variables.setVar(name, Atomics.load(sabVars[name], 0));
         });
 
-        // Handle Reduction
         if (reductionList.length > 0) {
             reductionList.forEach((varName, index) => {
-                // Get corresponding reduction code
                 let code = reductionCodes[index];
                 if (!code && reductionCodes.length > 0) {
                         code = reductionCodes[Math.min(index, reductionCodes.length - 1)];

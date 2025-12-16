@@ -10037,26 +10037,7 @@ Process.prototype.reportLoadWasm = function () {
         return "Waiting for WASM to initialize...";
     }
 
-
-    (async function() {
-        var Module = wasmWindow.Module;
-        var length = 8;
-        var bytes = length * 8;
-        
-        console.log("Allocating...");
-        var ptr = await Module._malloc(bytes);
-        
-        console.log("Processing in Threads...");
-        await Module._wasm_process_array(1, ptr, length, 100.5);
-        
-        console.log("Printing Result from C:");
-        await Module._print_array(ptr, length);
-        
-        await Module._free(ptr);
-        alert("Check Console (F12) for Parallel Results!");
-    })();
-
-    return "Processing started...";
+    return "WASM is ready!";
 };
 
 const workerSource = `
@@ -10331,58 +10312,77 @@ Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
     });
 };
 
-Process.prototype.reportWebAssemblyParallelMap = function (mapper, list, numWorkers) {
-    var mod = window.Module;
+Process.prototype.reportWebAssemblyParallelMap = async function (mapper, list, numWorkers) {
+    var iframe = document.getElementById('wasm-runner');
+    if (!iframe) throw new Error("Please use the LoadWasm block first.");
 
-    if (!mod || !mod._malloc) {
-        throw new Error("WebAssembly Module is not loaded.");
+    var wasmWindow = iframe.contentWindow;
+    if (!wasmWindow.Module || !wasmWindow.Module._malloc) {
+        throw new Error("WebAssembly Module is not fully loaded.");
     }
+    
+    var Module = wasmWindow.Module;
+
+    // --- 1. PARSE SNAP BLOCKS ---
+    var expression = mapper.expression; 
+    var selector = expression.selector;
+    var opCode = (selector === 'reportVariadicSum') ? 1 : 
+                 (selector === 'reportVariadicProduct') ? 2 : 0;
+                 
+    if (opCode === 0) throw new Error("Unsupported block. Use (+) or (*).");
 
     var jsArray = list.asArray(); 
     var length = jsArray.length;
-    var opCode = 0; 
-    var parameter = 0;
-
-    var expression = mapper.expression; 
-    var selector = expression.selector;
-
+    var bytesPerElement = 8;
+    
     var inputs = expression.inputs();
+    if (inputs.length > 0 && inputs[0] instanceof MultiArgMorph) {
+        inputs = inputs[0].inputs();
+    }
+    var parameter = (opCode === 2) ? 1 : 0;
+
     for (var i = 0; i < inputs.length; i++) {
-        var val = parseFloat(inputs[i]); 
+        var val = parseFloat(inputs[i].evaluate());
         if (!isNaN(val)) {
-            parameter = val;
-            break;
+            if (opCode === 2) {
+                parameter *= val; 
+            } else {
+                parameter += val;
+            }
         }
     }
 
-    if (selector === 'reportSum') {
-        opCode = 1; 
-    } 
-    else if (selector === 'reportProduct') {
-        opCode = 2; 
-    } 
-    else {
-        throw new Error("Unsupported block. Please use (+) or (*).");
-    }
-
-    var bytesPerElement = 8; 
-    var dataPtr = mod._malloc(length * bytesPerElement);
-    var heapOffset = dataPtr / bytesPerElement;
-
-    mod.HEAPF64.set(jsArray, heapOffset);
-
-    var resultStatus = mod._wasm_process_array(opCode, dataPtr, length, parameter);
-
-    if (isNaN(resultStatus)) {
-        mod._free(dataPtr);
-        throw new Error("C code returned error (NAN).");
-    }
-
-    var resultSubarray = mod.HEAPF64.subarray(heapOffset, heapOffset + length);
-    var resultList = Array.from(resultSubarray);
-
-    mod._free(dataPtr);
-    return new List(resultList);
+    
+    resultList = new List()
+    this.awaitPromise(async () => {
+        var dataPtr = await Module._malloc(length * bytesPerElement);
+        var heapOffset = dataPtr / bytesPerElement;
+    
+        var currentMemory = Module.wasmMemory || Module.asm.memory;
+        var tempHeap = new Float64Array(currentMemory.buffer);
+    
+         if (heapOffset + length > tempHeap.length) {
+            await Module._free(dataPtr);
+            throw new Error("Memory Failure");
+        }
+    
+        tempHeap.set(jsArray, heapOffset);    
+        var resultStatus = await Module._wasm_process_array(opCode, dataPtr, length, parameter, numWorkers);
+    
+        if (isNaN(resultStatus)) {
+            await Module._free(dataPtr);
+            throw new Error("C code returned error.");
+        }
+    
+        currentMemory = Module.wasmMemory || Module.asm.memory;
+        var resultView = new Float64Array(currentMemory.buffer).subarray(heapOffset, heapOffset + length);
+        
+        var resultList = Array.from(resultView);
+    
+        await Module._free(dataPtr);
+        
+        return resultList
+    })
 };
 
 

@@ -1163,7 +1163,7 @@ SpriteMorph.prototype.primitiveBlocks = function () {
         reportLoadWasm: {
             type: 'reporter',
             category: 'parallel',
-            spec: 'run test wasm',
+            spec: 'load wasm',
             defaults: []
         },
         reportMapReduce: {

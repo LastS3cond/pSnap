@@ -10312,7 +10312,7 @@ Process.prototype.reportParallelMap = function (mapper, list, numWorkers) {
     });
 };
 
-Process.prototype.reportWebAssemblyParallelMap = async function (mapper, list, numWorkers) {
+Process.prototype.reportWebAssemblyParallelMap = function (mapper, list, numWorkers) {
     var iframe = document.getElementById('wasm-runner');
     if (!iframe) throw new Error("Please use the LoadWasm block first.");
 
@@ -10323,7 +10323,6 @@ Process.prototype.reportWebAssemblyParallelMap = async function (mapper, list, n
     
     var Module = wasmWindow.Module;
 
-    // --- 1. PARSE SNAP BLOCKS ---
     var expression = mapper.expression; 
     var selector = expression.selector;
     var opCode = (selector === 'reportVariadicSum') ? 1 : 
@@ -10354,7 +10353,7 @@ Process.prototype.reportWebAssemblyParallelMap = async function (mapper, list, n
 
     
     resultList = new List()
-    this.awaitPromise(async () => {
+    return this.awaitPromise(async () => {
         var dataPtr = await Module._malloc(length * bytesPerElement);
         var heapOffset = dataPtr / bytesPerElement;
     
@@ -10373,12 +10372,10 @@ Process.prototype.reportWebAssemblyParallelMap = async function (mapper, list, n
             await Module._free(dataPtr);
             throw new Error("C code returned error.");
         }
-    
         currentMemory = Module.wasmMemory || Module.asm.memory;
         var resultView = new Float64Array(currentMemory.buffer).subarray(heapOffset, heapOffset + length);
         
         var resultList = Array.from(resultView);
-    
         await Module._free(dataPtr);
         
         return resultList

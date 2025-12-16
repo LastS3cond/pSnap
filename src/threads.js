@@ -10022,7 +10022,7 @@ Process.prototype.reportLoadWasm = function () {
         iframe = document.createElement('iframe');
         iframe.id = 'wasm-runner';
         iframe.style.display = 'none'; 
-        iframe.src = '../wasm_experiments_temp/array_processor.html'; 
+        iframe.src = '../wasm_module/array_processor.html'; 
         document.body.appendChild(iframe);
         
         iframe.onload = function() {

@@ -10470,7 +10470,9 @@ function prepVariables(firstPrivate, privateVars, lastPrivateVars, sharedVars, r
     
     const allowedDuplicates = new Set([
         'firstPrivate:lastPrivate',
-        'lastPrivate:firstPrivate'
+        'lastPrivate:firstPrivate',
+        'firstPrivate:reduction',
+        'reduction:firstPrivate'
     ]);
 
     const checkDuplicates = (names, listName) => {

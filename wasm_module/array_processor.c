@@ -4,8 +4,6 @@
 #include <emscripten/emscripten.h>
 #include <stdio.h>
 
-#define NUM_THREADS 4
-
 typedef struct {
     double* arr;
     int start_index;
@@ -50,29 +48,29 @@ void print_array(double* arr, int length) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-double wasm_process_array(int operation_code, double* arr_ptr, int length, double parameter) {
+double wasm_process_array(int operation_code, double* arr_ptr, int length, double parameter, int num_threads) {
     if (length < 0) return NAN;
 
     ArrayOperationCode op = (ArrayOperationCode) operation_code;
     if (op == OP_UNSUPPORTED) return NAN;
 
-    int chunk_size = length / NUM_THREADS;
-    int remainder = length % NUM_THREADS;
+    int chunk_size = length / num_threads;
+    int remainder = length % num_threads;
 
-    pthread_t threads[NUM_THREADS];
-    thread_task_t tasks[NUM_THREADS];
+    pthread_t threads[num_threads];
+    thread_task_t tasks[num_threads];
     
     int current_index = 0;
 
-    printf("Starting parallel array processing with %d workers...\n", NUM_THREADS);
+    printf("Starting parallel array processing with %d workers...\n", num_threads);
 
-    for (int i = 0; i < NUM_THREADS; i++) {
+    for (int i = 0; i < num_threads; i++) {
         tasks[i].arr = arr_ptr;
         tasks[i].start_index = current_index;
         tasks[i].parameter = parameter;
         tasks[i].operation = op;
 
-        int size = chunk_size + (i == NUM_THREADS - 1 ? remainder : 0);
+        int size = chunk_size + (i == num_threads - 1 ? remainder : 0);
         tasks[i].end_index = tasks[i].start_index + size;
 
         current_index = tasks[i].end_index;
@@ -89,7 +87,7 @@ double wasm_process_array(int operation_code, double* arr_ptr, int length, doubl
         }
     }
 
-    for (int i = 0; i < NUM_THREADS; i++) {
+    for (int i = 0; i < num_threads; i++) {
         if (threads[i] != 0) {
             pthread_join(threads[i], NULL);
         }

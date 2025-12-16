@@ -17,7 +17,7 @@ Use this command to compile the wasm:
 emcc array_processor.c -o array_processor.html \
     -O3 \
     -s USE_PTHREADS=1 \
-    -s PTHREAD_POOL_SIZE=6 \
+    -s PTHREAD_POOL_SIZE=17 \
     -s ALLOW_MEMORY_GROWTH=1 \
     -s PROXY_TO_PTHREAD=1 \
     -s EXPORTED_FUNCTIONS="['_wasm_process_array','_main','_malloc','_free','_print_array']"

@@ -1175,7 +1175,7 @@ SpriteMorph.prototype.primitiveBlocks = function () {
         doParallelFor: {
             type: 'command',
             category: 'parallel',
-            spec: 'parallel for %upvar = %n to %n with %n workers; firstPrivate %mult%var ; private %mult%var ; lastPrivate %mult%var ; reduce %mult%var using %mult%repRing %cla',
+            spec: 'parallel for %upvar = %n to %n with %n workers; firstPrivate %mult%var ; private %mult%var ; lastPrivate %mult%var ; shared %mult%var ; reduce %mult%var using %mult%repRing %cla',
             defaults: ['i', 1, 10, 4],
             code: 'parallelFor'
         },
@@ -1189,7 +1189,7 @@ SpriteMorph.prototype.primitiveBlocks = function () {
         doParallelForEach: {
             type: 'command',
             category: 'parallel',
-            spec: 'parallel for each %upvar in %l with %n workers; firstPrivate %mult%var ; private %mult%var ; lastPrivate %mult%var ; reduce %mult%var using %mult%repRing %cla',
+            spec: 'parallel for each %upvar in %l with %n workers; firstPrivate %mult%var ; private %mult%var ; lastPrivate %mult%var ; shared %mult%var ; reduce %mult%var using %mult%repRing %cla',
             defaults: ['item', null, 4],
             code: 'parallelForEach'
         },
@@ -1197,6 +1197,11 @@ SpriteMorph.prototype.primitiveBlocks = function () {
             type: 'reporter',
             category: 'parallel',
             spec: 'get worker id',
+        },
+        doAtomic: {
+            type: 'command',
+            category: 'parallel',
+            spec: 'atomic %cla'
         },
         doWait: {
             type: 'command',
@@ -4196,6 +4201,7 @@ SpriteMorph.prototype.blockTemplates = function (
         blocks.push(block('doParallelFor'));
         blocks.push(block('doParallelForEach'));
         blocks.push(block('reportGetWorkerId'));
+        blocks.push(block('doAtomic'));
         blocks.push(block('reportLoadWasm'))
     }
 

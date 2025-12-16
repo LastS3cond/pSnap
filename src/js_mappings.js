@@ -30,16 +30,13 @@
         'e^': 'Math.exp', '10^': '10^', '2^': '2^', 'id': ''
     };
 
-    // --- NEW: Slot Counter ---
     let slotIndex = 0;
 
-    // B. Entry Point
     ReporterBlockMorph.prototype.transpileForWorker = function (paramNames = ['item'], sharedList = []) {
         slotIndex = 0; 
         return this.transpileReporter(paramNames, sharedList);
     };
     
-    // NEW: Command Block Entry Point
     CommandBlockMorph.prototype.transpileForWorker = function (paramNames = [], sharedList = []) {
         slotIndex = 0;
         let code = this.transpileCommand(paramNames, sharedList);
@@ -61,23 +58,19 @@
         return blocks;
     }
 
-    // NEW: Command Transpiler Logic
     CommandBlockMorph.prototype.transpileCommand = function(paramNames, sharedList = []) {
         const selector = this.selector;
         const inputs = this.inputs();
 
         switch (selector) {
             case 'doSetVar':
-                // inputs[0] is the variable name (string), inputs[1] is value
                 return `${inputs[0].evaluate()} = ${this.transpileInput(inputs[1], paramNames, sharedList)}`;
             case 'doChangeVar':
                 return `${inputs[0].evaluate()} += Number(${this.transpileInput(inputs[1], paramNames, sharedList)})`;
             case 'doDeclareVariables':
-                // var names are in inputs[0] (MultiArgMorph)
                 const vars = inputs[0].inputs().map(slot => slot.evaluate()).join(', ');
                 return `let ${vars}`;
             case 'log':
-                // inputs[0] is MultiArgMorph for %mult%s
                 const args = inputs[0].inputs().map(inp => this.transpileInput(inp, paramNames, sharedList)).join(', ');
                 return `console.log(${args})`;
             case 'doAtomic':
@@ -104,7 +97,6 @@
         }
     };
 
-    // C. Main Logic
     ReporterBlockMorph.prototype.transpileReporter = function (paramNames, sharedList = []) {
         const selector = this.selector;
         const inputs = this.inputs();
@@ -174,14 +166,12 @@
         if (input instanceof CommandBlockMorph) return input.transpileForWorker(paramNames, sharedList); // Handle nested commands if any
         
         if (input instanceof InputSlotMorph) {
-            // FIX: If slot is empty, pick the NEXT parameter, not always the first one
             if (input.contents().text === '') {
                 const param = paramNames[slotIndex % paramNames.length];
                 slotIndex++; 
                 return param;
             }
             const val = input.evaluate();
-            // Quote strings that aren't numbers to ensure valid JS syntax
             return isNaN(Number(val)) ? `"${val}"` : val;
         }
         return 'item';

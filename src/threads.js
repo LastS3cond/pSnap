@@ -10491,6 +10491,7 @@ function transpileBody(script, paramNames, privateList, lastPrivateList, sharedL
     let jsCode = '';
     let reductionCodes = [];
     let initializations = {};
+    const upvar = paramNames[0];
 
     try {
         if (script && script.expression && typeof script.expression.transpileForWorker === 'function') {

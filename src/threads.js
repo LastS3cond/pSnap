@@ -10351,9 +10351,7 @@ Process.prototype.reportWebAssemblyParallelMap = function (mapper, list, numWork
         }
     }
 
-    
-    resultList = new List()
-    return this.awaitPromise(async () => {
+    return new List(this.awaitPromise(async () => {
         var dataPtr = await Module._malloc(length * bytesPerElement);
         var heapOffset = dataPtr / bytesPerElement;
     
@@ -10379,7 +10377,7 @@ Process.prototype.reportWebAssemblyParallelMap = function (mapper, list, numWork
         await Module._free(dataPtr);
         
         return resultList
-    })
+    }))
 };
 
 
